@@ -1,0 +1,45 @@
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9000
+
+static_resources:
+  clusters:
+  - name: cluster_bridge
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_bridge
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 1002
+  - name: cluster_client
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_client
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 1000
+  listeners:
+    name: listener_0
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 1001
+    filter_chains:
+    - filter_chain_match: # Receive from client
+          destination_port: 1001
+          source_ports: 1000
+      filters:
+        - name: echo
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.echo.v3.Echo

@@ -1,0 +1,61 @@
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9000
+
+static_resources:
+  clusters:
+  - name: cluster_listener_1
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_listener_1
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 2001
+  - name: cluster_client
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_client
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 1000
+  listeners:
+    name: listener_0
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 1001
+    filter_chains:
+    - filter_chain_match: # Receive from client
+          destination_port: 1001
+          source_ports: 1000
+      filters:
+        - name: echo
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.echo.v3.Echo
+        - name: envoy.filters.network.tcp_proxy
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+            stat_prefix: destination
+            cluster: cluster_listener_1
+    - filter_chain_match: # Receive from listener_1
+          destination_port: 1001
+      filters:
+        - name: echo
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.echo.v3.Echo
+        - name: envoy.filters.network.tcp_proxy
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+            stat_prefix: destination
+            cluster: cluster_client
