@@ -1,0 +1,46 @@
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9001
+
+static_resources:
+  clusters:
+  - name: cluster_upstream
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_upstream
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 3001
+  - name: cluster_bridge
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_bridge
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 2000
+  listeners:
+    name: listener_2
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 3000
+    filter_chains:
+    # - filter_chain_match: # Receive from bridge
+    #     source_ports: 2000
+      filters:
+        - name: envoy.filters.network.tcp_proxy
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+            stat_prefix: destination
+            cluster: cluster_upstream

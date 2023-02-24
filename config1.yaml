@@ -17,7 +17,7 @@ static_resources:
                 address:
                   socket_address:
                     address: 0.0.0.0
-                    port_value: 1002
+                    port_value: 2000
   - name: cluster_client
     connect_timeout: 60s
     load_assignment:
@@ -30,7 +30,7 @@ static_resources:
                     address: 0.0.0.0
                     port_value: 1000
   listeners:
-    name: listener_0
+    name: listener_1
     address:
       socket_address:
         address: 0.0.0.0
