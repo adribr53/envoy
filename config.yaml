@@ -43,3 +43,4 @@ static_resources:
         - name: echo
           typed_config:
             "@type": type.googleapis.com/envoy.extensions.filters.network.echo.v3.Echo
+            destination_cluster: cluster_bridge

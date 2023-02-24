@@ -32,7 +32,7 @@ Network::FilterStatus EchoFilter::onData(Buffer::Instance& data, bool end_stream
   int message_length = data.length();
   int bytes_sent = send(sock_, data.toString().c_str(), message_length, 0);
   if (bytes_sent != message_length) {
-      ENVOY_LOG(debug, "Failed to send message to upstream server");
+      ENVOY_LOG(error, "Failed to send message to upstream server");
       data.drain(data.length());
       return Envoy::Network::FilterStatus::Continue;
   }
