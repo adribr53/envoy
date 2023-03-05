@@ -1,0 +1,39 @@
+admin:
+  access_log_path: /dev/null
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9000
+
+static_resources:
+  clusters:
+  - name: cluster_upstream
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_upstream
+      endpoints:
+        - lb_endpoints:
+            - endpoint:
+                address:
+                  socket_address:
+                    address: 0.0.0.0
+                    port_value: 2000
+  listeners:
+    name: listener_1
+    address:
+      socket_address:
+        address: 0.0.0.0
+        port_value: 1001
+    filter_chains:
+    - filter_chain_match: # Receive from downstream
+            source_prefix_ranges:
+              - address_prefix: 127.0.0.1
+                prefix_len: 24
+            source_ports:
+              - 999
+              - 1000
+      filters:
+        - name: echo
+          typed_config:
+            "@type": type.googleapis.com/envoy.extensions.filters.network.echo.v3.Echo
+            destination_cluster: cluster_upstream
