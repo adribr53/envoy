@@ -19,6 +19,28 @@ namespace Echo {
 
 Network::FilterStatus EchoFilter::onData(Buffer::Instance& data, bool end_stream) {
   ENVOY_CONN_LOG(trace, "echo: got {} bytes", read_callbacks_->connection(), data.length());
+
+  // // Extract the flag field from the buffer
+  // uint8_t flag;
+  // data.copyOut(0, sizeof(flag), &flag);
+  // ENVOY_LOG(debug, "flag: {}", flag);
+  
+  // // Extract the str field from the buffer
+  // char str[10];
+  // memset(str, '\0', sizeof(str));
+  // data.copyOut(sizeof(flag), sizeof(str), str);
+  // ENVOY_LOG(debug, "str: {}", str);
+  
+  // // Extract the num field from the buffer
+  // int32_t num;
+  // data.copyOut(sizeof(flag) + sizeof(str), sizeof(num), &num);
+  // ENVOY_LOG(debug, "num: {}", ntohl(num));
+  
+  // // Extract the payload field from the buffer
+  // char payload[256];
+  // memset(payload, '\0', sizeof(payload));
+  // data.copyOut(sizeof(flag) + sizeof(str) + sizeof(num), sizeof(payload), payload);
+  // ENVOY_LOG(debug, "payload: {}", payload);
   
   // Print downstream IP + port
   Network::Connection& connection = read_callbacks_->connection();
