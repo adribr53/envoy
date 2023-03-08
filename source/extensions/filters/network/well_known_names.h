@@ -18,6 +18,10 @@ public:
   const std::string ConnectionLimit = "envoy.filters.network.connection_limit";
   // Echo filter
   const std::string Echo = "envoy.filters.network.echo";
+  // Receiver filter
+  const std::string Receiver = "envoy.filters.network.receiver";
+  // Sender filter
+  const std::string Sender = "envoy.filters.network.sender";
   // Direct response filter
   const std::string DirectResponse = "envoy.filters.network.direct_response";
   // RocketMQ proxy filter
