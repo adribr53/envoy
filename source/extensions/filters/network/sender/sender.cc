@@ -54,9 +54,9 @@ Network::FilterStatus SenderFilter::onData(Buffer::Instance& data, bool end_stre
   ENVOY_LOG(debug, output);
   ENVOY_LOG(debug, end_stream);
 
-  // Forward requests from downstream to upstream
+  // Forward requests from downstream to upstream using RDMA
   int message_length = data.length();
-  int bytes_sent = send(sock_, data.toString().c_str(), message_length, 0);
+  int bytes_sent = send(sock_distant_rdma_, data.toString().c_str(), message_length, 0);
   if (bytes_sent != message_length) {
       ENVOY_LOG(error, "Failed to send message to upstream server");
       data.drain(data.length());

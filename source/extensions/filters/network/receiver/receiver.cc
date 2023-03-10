@@ -18,52 +18,70 @@ namespace NetworkFilters {
 namespace Receiver {
 
 Network::FilterStatus ReceiverFilter::onData(Buffer::Instance& data, bool end_stream) {
-  ENVOY_CONN_LOG(trace, "receiver: got {} bytes", read_callbacks_->connection(), data.length());
+  if (flag_ == 0) {
+    ENVOY_CONN_LOG(trace, "receiver: got {} bytes", read_callbacks_->connection(), data.length());
 
-  // // Extract the flag field from the buffer
-  // uint8_t flag;
-  // data.copyOut(0, sizeof(flag), &flag);
-  // ENVOY_LOG(debug, "flag: {}", flag);
-  
-  // // Extract the str field from the buffer
-  // char str[10];
-  // memset(str, '\0', sizeof(str));
-  // data.copyOut(sizeof(flag), sizeof(str), str);
-  // ENVOY_LOG(debug, "str: {}", str);
-  
-  // // Extract the num field from the buffer
-  // int32_t num;
-  // data.copyOut(sizeof(flag) + sizeof(str), sizeof(num), &num);
-  // ENVOY_LOG(debug, "num: {}", ntohl(num));
-  
-  // // Extract the payload field from the buffer
-  // char payload[256];
-  // memset(payload, '\0', sizeof(payload));
-  // data.copyOut(sizeof(flag) + sizeof(str) + sizeof(num), sizeof(payload), payload);
-  // ENVOY_LOG(debug, "payload: {}", payload);
-  
-  // Print downstream IP + port
-  Network::Connection& connection = read_callbacks_->connection();
-  const auto& stream_info = connection.streamInfo();
-  Network::Address::InstanceConstSharedPtr remote_address = stream_info.downstreamAddressProvider().remoteAddress();
-  std::string source_ip = remote_address->ip()->addressAsString();
-  uint32_t source_port = remote_address->ip()->port();
-  ENVOY_LOG(debug, "Received {} bytes from {}:{}", data.length(), source_ip, source_port);
+    std::string output = data.toString();
+    ENVOY_LOG(debug, output);
+    ENVOY_LOG(debug, end_stream);
 
-  std::string output = data.toString();
-  ENVOY_LOG(debug, output);
-  ENVOY_LOG(debug, end_stream);
+    rdma_sock_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (rdma_sock_ < 0) {
+      throw EnvoyException("Failed to create RDMA socket");
+    }
 
-  // Forward requests from downstream to upstream
-  int message_length = data.length();
-  int bytes_sent = send(sock_, data.toString().c_str(), message_length, 0);
-  if (bytes_sent != message_length) {
-      ENVOY_LOG(error, "Failed to send message to upstream server");
-      data.drain(data.length());
-      return Network::FilterStatus::Continue;
+    // Print downstream IP + port
+    Network::Connection& connection = read_callbacks_->connection();
+    const auto& stream_info = connection.streamInfo();
+    Network::Address::InstanceConstSharedPtr remote_address = stream_info.downstreamAddressProvider().remoteAddress();
+    std::string downstream_ip = remote_address->ip()->addressAsString();
+
+    // Connect to downstream
+    uint32_t downstream_port = static_cast<uint32_t>(std::stoul(data.toString()));
+    struct sockaddr_in downstream_address_;
+    downstream_address_.sin_family = AF_INET;
+    downstream_address_.sin_port = htons(downstream_port);
+    ENVOY_LOG(error, "IP: {}, Port: {}", downstream_ip, downstream_port);
+
+    if (inet_pton(AF_INET, downstream_ip.c_str(), &downstream_address_.sin_addr) <= 0) {
+      throw EnvoyException("Invalid address/Address not supported");
+    }
+
+    if (connect(rdma_sock_, reinterpret_cast<struct sockaddr*>(&downstream_address_), sizeof(downstream_address_)) < 0) {
+      throw EnvoyException("Failed to connect to downstream");
+    }
+    ENVOY_LOG(debug, "CONNECTED TO DOWNSTREAM");
+
+    // Connect to upstream
+    upstream_sock_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (upstream_sock_ < 0) {
+      throw EnvoyException("Failed to create socket");
+    }
+
+    memset(&upstream_address_, 0, sizeof(upstream_address_));
+    upstream_address_.sin_family = AF_INET;
+    upstream_address_.sin_port = htons(upstream_port_);
+
+    if (inet_pton(AF_INET, upstream_ip_.c_str(), &upstream_address_.sin_addr) <= 0) {
+      throw EnvoyException("Invalid address/Address not supported");
+    }
+
+    if (connect(upstream_sock_, reinterpret_cast<struct sockaddr*>(&upstream_address_), sizeof(upstream_address_)) < 0) {
+      throw EnvoyException("Failed to connect to upstream");
+    }
+    ENVOY_LOG(debug, "CONNECTED TO UPSTREAM");
+
+    // Launch reponses from upstream handler
+    std::thread upstream_to_downstream_thread(&ReceiverFilter::upstream_to_downstream, this);
+    upstream_to_downstream_thread.detach();
+    
+    // Launch requests from downstream handler
+    std::thread downstream_to_upstream_thread(&ReceiverFilter::downstream_to_upstream, this);
+    downstream_to_upstream_thread.detach();
+
+    data.drain(data.length());
+    flag_ = 1;
   }
-
-  data.drain(data.length());
   return Network::FilterStatus::StopIteration;
 } 
 

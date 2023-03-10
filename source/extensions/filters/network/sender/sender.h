@@ -37,6 +37,12 @@ public:
     if (sock_ >= 0) {
       close(sock_);
     }
+    if (sock_rdma_ >= 0) {
+      close(sock_rdma_);
+    }
+    if (sock_distant_rdma_ >= 0) {
+      close(sock_distant_rdma_);
+    }
   }
 
   // Constructor
@@ -63,45 +69,117 @@ public:
       throw EnvoyException("Failed to connect to upstream");
     }
 
-  // Display local socket IP + Port
+    // Display local socket IP + Port
     struct sockaddr_in source_addr;
     socklen_t source_len = sizeof(source_addr);
     getsockname(sock_, reinterpret_cast<struct sockaddr*>(&source_addr), &source_len);
     ENVOY_LOG(debug, "Socket source IP {}:{}", inet_ntoa(source_addr.sin_addr), std::to_string(ntohs(source_addr.sin_port)));
 
-    // Launch reponses from upstream handler
-    std::thread receive_thread(&SenderFilter::receive_messages, this, sock_);
-    receive_thread.detach();
+    sock_rdma_ = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock_rdma_ < 0) {
+      throw EnvoyException("Failed to create RDMA socket");
+    }
+
+    // bind the socket to an address
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    socklen_t len = sizeof(addr);
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = 0;  // 0 means that the system will assign a free port number
+    if (bind(sock_rdma_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+        throw EnvoyException("Binding error");
+    }
+
+    // query the socket to find out which port it was bound to
+    if (getsockname(sock_rdma_, reinterpret_cast<struct sockaddr*>(&addr), &len) < 0) {
+        throw EnvoyException("getsockname failed");
+    }
+
+    // Send the port of the second socket to the server
+    char msg[32];
+    sprintf(msg, "%d", ntohs(addr.sin_port));
+    ENVOY_LOG(debug, "msg: {}", msg);
+    if (send(sock_, msg, strlen(msg), 0) < 0) {
+        throw EnvoyException("send failed");
+    }
+
+    if (listen(sock_rdma_, 1) < 0) {
+      throw EnvoyException("listen failed");
+    }
+
+    ENVOY_LOG(debug, "Waiting for incoming connections...");
+
+    struct sockaddr_in client_addr;
+    int addrlen2 = sizeof(client_addr);
+    sock_distant_rdma_ = accept(sock_rdma_, reinterpret_cast<struct sockaddr*>(&client_addr), reinterpret_cast<socklen_t*>(&addrlen2));
+    if (sock_distant_rdma_ < 0) {
+        throw EnvoyException("accept failed");
+    }
+    ENVOY_LOG(debug, "Connection accepted");
+
+    // Launch TCP reponses from upstream handler
+    std::thread upstream_to_downstream_tcp_thread(&SenderFilter::upstream_to_downstream_tcp, this);
+    upstream_to_downstream_tcp_thread.detach();
+
+    // Launch RDMA reponses from upstream handler
+    std::thread upstream_to_downstream_rdma_thread(&SenderFilter::upstream_to_downstream_rdma, this);
+    upstream_to_downstream_rdma_thread.detach();
   }
 
-  // Handle responses received from upstream: send them back to downstream
-  void receive_messages(int socket_fd) {
+  // Handle responses received from upstream TCP connection
+  void upstream_to_downstream_tcp() {
     const int BUFFER_SIZE = 1024;
     char buffer[BUFFER_SIZE];
     int bytes_received;
 
     while (true) {
-        bytes_received = recv(socket_fd, buffer, BUFFER_SIZE, 0);
+        memset(buffer, '\0', BUFFER_SIZE);
+        bytes_received = recv(sock_, buffer, BUFFER_SIZE, 0);
         if (bytes_received < 0) {
-            ENVOY_LOG(info, "Error receiving message from upstream");
+            ENVOY_LOG(info, "Error receiving message from TCP upstream");
             break;
         } else if (bytes_received == 0) {
-            ENVOY_LOG(info, "Upstream closed the connection");
+            ENVOY_LOG(info, "TCP Upstream closed the connection");
             break;
         }
 
         std::string message(buffer, bytes_received);
-        ENVOY_LOG(info, "Received message from upstream: {}", message);
+        ENVOY_LOG(info, "Received message from TCP upstream: {}", message);
+    }
+    close(sock_);
+  }
+
+  // Handle responses received from RDMA upstream: send them back to downstream
+  void upstream_to_downstream_rdma() {
+    const int BUFFER_SIZE = 1024;
+    char buffer[BUFFER_SIZE];
+    int bytes_received;
+
+    while (true) {
+        memset(buffer, '\0', BUFFER_SIZE);
+        bytes_received = recv(sock_distant_rdma_, buffer, BUFFER_SIZE, 0);
+        if (bytes_received < 0) {
+            ENVOY_LOG(info, "Error receiving message from RDMA upstream");
+            break;
+        } else if (bytes_received == 0) {
+            ENVOY_LOG(info, "RDMA Upstream closed the connection");
+            break;
+        }
+
+        std::string message(buffer, bytes_received);
+        ENVOY_LOG(info, "Received message from RDMA upstream: {}", message);
 
         Buffer::InstancePtr buffer(new Buffer::OwnedImpl(message));
         auto& connection = read_callbacks_->connection();
         if (connection.state() != Network::Connection::State::Closed) {
-          ENVOY_LOG(info, "Sent message to downstream: {}", message);
+          // ENVOY_LOG(info, "Sent message to downstream: {}", message);
           connection.write(*buffer, false);
         }
     }
-    close(socket_fd);
-}
+    close(sock_distant_rdma_);
+    close(sock_rdma_);
+  }
 
 private:
   Network::ReadFilterCallbacks* read_callbacks_{};
@@ -109,6 +187,8 @@ private:
   std::string upstream_ip_;
   uint32_t upstream_port_;
   struct sockaddr_in upstream_address_;
+  int sock_rdma_;
+  int sock_distant_rdma_;
 };
 
 } // namespace Sender
