@@ -40,6 +40,7 @@ private:
         return [address](Network::FilterManager& filter_manager) -> void {
           auto receiver_filter = std::make_shared<ReceiverFilter>(address->ip()->addressAsString(), address->ip()->port());
           filter_manager.addReadFilter(receiver_filter);
+          filter_manager.addWriteFilter(receiver_filter);
         };
       }
       else {
@@ -53,7 +54,7 @@ private:
 
   bool isTerminalFilterByProtoTyped(const envoy::extensions::filters::network::receiver::v3::Receiver&,
                                     Server::Configuration::ServerFactoryContext&) override {
-    return true;
+    return false;
   }
 };
 

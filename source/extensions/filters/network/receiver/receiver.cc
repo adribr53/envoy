@@ -11,117 +11,83 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
+#include <thread>
 
 namespace Envoy {
 namespace Extensions {
 namespace NetworkFilters {
 namespace Receiver {
 
-Network::FilterStatus ReceiverFilter::onData(Buffer::Instance& data, bool end_stream) {
-  if (flag_ == 0) {
-    ENVOY_CONN_LOG(trace, "receiver: got {} bytes", read_callbacks_->connection(), data.length());
-
-    std::string output = data.toString();
-    ENVOY_LOG(debug, output);
-    ENVOY_LOG(debug, end_stream);
-    downstream_port_ = std::stoul(data.toString());
-
-    // Connect to upstream (TCP server)
-    upstream_sock_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (upstream_sock_ < 0) {
-      ENVOY_LOG(error, "Failed to create socket");
-      read_callbacks_->connection().close(Network::ConnectionCloseType::Abort);
-      return Network::FilterStatus::StopIteration; 
+    Network::FilterStatus ReceiverFilter::onNewConnection() {
+        ENVOY_LOG(debug, "onNewConnection triggered");
+        return Network::FilterStatus::Continue;
     }
 
-    memset(&upstream_address_, 0, sizeof(upstream_address_));
-    upstream_address_.sin_family = AF_INET;
-    upstream_address_.sin_port = htons(upstream_port_);
+    Network::FilterStatus ReceiverFilter::onData(Buffer::Instance& data, bool end_stream) {
+        ENVOY_CONN_LOG(trace, "receiver: got {} bytes", read_callbacks_->connection(), data.length());
+        if (!connection_init_) {
+            ENVOY_LOG(debug, "Connection init");
+            ENVOY_LOG(debug, "read data: {}, end_stream: {}", data.toString(), end_stream);
+            std::string input = data.toString();
+            std::string portStr, dataStr;
+            splitString(input, portStr, dataStr);
+            ENVOY_LOG(debug, "portStr: {}, dataStr: {}", portStr, dataStr);
 
-    if (inet_pton(AF_INET, upstream_ip_.c_str(), &upstream_address_.sin_addr) <= 0) {
-      ENVOY_LOG(error, "Invalid address/Address not supported");
-      read_callbacks_->connection().close(Network::ConnectionCloseType::Abort);
-      return Network::FilterStatus::StopIteration; 
-    }
+            // Connect to RDMA downstream using received port
+            struct sockaddr_in downstream_address_;
+            uint32_t downstream_port = std::stoul(portStr);
+            std::string downstream_ip = read_callbacks_->connection().streamInfo().downstreamAddressProvider().remoteAddress()->ip()->addressAsString();
+            downstream_address_.sin_family = AF_INET;
+            downstream_address_.sin_port = htons(downstream_port);
+            ENVOY_LOG(debug, "DOWNSTREAM IP: {}, Port: {}", downstream_ip, downstream_port);
+            inet_pton(AF_INET, downstream_ip.c_str(), &downstream_address_.sin_addr);
 
-    if (connect(upstream_sock_, reinterpret_cast<struct sockaddr*>(&upstream_address_), sizeof(upstream_address_)) < 0) {
-      // If connection to upstream server fails
-      ENVOY_LOG(error, "TCP Failed to connect to upstream");
-      Buffer::InstancePtr buffer(new Buffer::OwnedImpl("ERROR"));
-      auto& connection = read_callbacks_->connection();
-      if (connection.state() != Network::Connection::State::Closed) {
-        connection.write(*buffer, false);
-      }
-      // read_callbacks_->connection().close(Network::ConnectionCloseType::Abort);
-      return Network::FilterStatus::StopIteration;
-    }
-    // If connection to server is successful
-    ENVOY_LOG(debug, "CONNECTED TO UPSTREAM SERVER");
-    Buffer::InstancePtr buffer(new Buffer::OwnedImpl("ACK"));
-    auto& connection = read_callbacks_->connection();
-    if (connection.state() != Network::Connection::State::Closed) {
-      connection.write(*buffer, false);
-    }
-  }
+            // Try to connect to RDMA downstream
+            int count = 0;
+            sock_rdma_ = socket(AF_INET, SOCK_STREAM, 0);
+            while ((connect(sock_rdma_, reinterpret_cast<struct sockaddr*>(&downstream_address_), sizeof(downstream_address_ ))) != 0) {
+                if (count >= 10) {
+                    ENVOY_LOG(error, "RDMA Failed to connect to downstream");
+                    return Network::FilterStatus::StopIteration;
+                }
+                ENVOY_LOG(error, "RETRY CONNECTING TO RDMA DOWNSTREAM...");
+                sleep(1);
+                count++;
+            }
+            ENVOY_LOG(debug, "CONNECTED TO RDMA DOWNSTREAM");
 
-  if (flag_ == 1) {
-    // Receive second ACK to indicate that downstream listener now listens to RDMA socket
-    std::string ack2 = data.toString();
-    ENVOY_LOG(error, "ack2: {}", ack2);
-    if (ack2 != "ACK2") {
-      ENVOY_LOG(error, "Received non-ACK2 from downstream listener");
-      read_callbacks_->connection().close(Network::ConnectionCloseType::Abort);
-      return Network::FilterStatus::StopIteration; 
-    }
+            // Launch RDMA polling thread
+            std::thread rdma_polling(&ReceiverFilter::rdma_polling, this);
+            rdma_polling.detach();
 
-    // Connect to RDMA downstream (remote listener)
-    rdma_sock_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (rdma_sock_ < 0) {
-      ENVOY_LOG(error, "Failed to create RDMA socket");
-      read_callbacks_->connection().close(Network::ConnectionCloseType::Abort);
-      return Network::FilterStatus::StopIteration; 
-    }
+            // Launch RDMA sender thread
+            std::thread rdma_sender(&ReceiverFilter::rdma_sender, this);
+            rdma_sender.detach();
 
-    // Print downstream IP + port
-    Network::Connection& connection = read_callbacks_->connection();
-    const auto& stream_info = connection.streamInfo();
-    Network::Address::InstanceConstSharedPtr remote_address = stream_info.downstreamAddressProvider().remoteAddress();
-    std::string downstream_ip = remote_address->ip()->addressAsString();
+            // Launch upstream sender thread
+            std::thread upstream_sender(&ReceiverFilter::upstream_sender, this);
+            upstream_sender.detach();
+            
+            downstream_to_upstream_buffer_.put(dataStr);
+            connection_init_ = true;
+        }
+        else {
+            ENVOY_LOG(debug, "Regular data");
+            ENVOY_LOG(debug, "read data: {}, end_stream: {}", data.toString(), end_stream);
+            downstream_to_upstream_buffer_.put(data.toString());
+        }
+        data.drain(data.length());
+        return Network::FilterStatus::StopIteration;
+    } 
 
-    // Connect to downstream
-    uint32_t downstream_port = static_cast<uint32_t>(downstream_port_);
-    struct sockaddr_in downstream_address_;
-    downstream_address_.sin_family = AF_INET;
-    downstream_address_.sin_port = htons(downstream_port);
-    ENVOY_LOG(info, "IP: {}, Port: {}", downstream_ip, downstream_port);
-
-    if (inet_pton(AF_INET, downstream_ip.c_str(), &downstream_address_.sin_addr) <= 0) {
-      ENVOY_LOG(error, "Invalid address/Address not supported");
-      read_callbacks_->connection().close(Network::ConnectionCloseType::Abort);
-      return Network::FilterStatus::StopIteration; 
-    }
-
-    int res = connect(rdma_sock_, reinterpret_cast<struct sockaddr*>(&downstream_address_), sizeof(downstream_address_));
-    if (res < 0) {
-      ENVOY_LOG(error, "RDMA Failed to connect to downstream");
-      ENVOY_LOG(error, "res: {}, {}", res, errno);
-      read_callbacks_->connection().close(Network::ConnectionCloseType::FlushWrite);
-      return Network::FilterStatus::StopIteration;
-    }
-    ENVOY_LOG(debug, "CONNECTED TO DOWNSTREAM");
-
-    // Launch reponses from upstream handler
-    std::thread upstream_to_downstream_thread(&ReceiverFilter::upstream_to_downstream, this);
-    upstream_to_downstream_thread.detach();
-    
-    // Launch requests from downstream handler
-    std::thread downstream_to_upstream_thread(&ReceiverFilter::downstream_to_upstream, this);
-    downstream_to_upstream_thread.detach();
-  }
-  flag_++;
-  data.drain(data.length());
-  return Network::FilterStatus::StopIteration;
-} 
+    Network::FilterStatus ReceiverFilter::onWrite(Buffer::Instance& data, bool end_stream) {
+        ENVOY_CONN_LOG(trace, "receiver: got {} bytes", write_callbacks_->connection(), data.length());
+        ENVOY_LOG(debug, "written data: {}, end_stream: {}", data.toString(), end_stream);
+        upstream_to_downstream_buffer_.put(data.toString());
+        //write_callbacks_->injectWriteDataToFilterChain(data, end_stream);
+        data.drain(data.length());
+        return Network::FilterStatus::StopIteration;
+    } 
 
 } // namespace Receiver
 } // namespace NetworkFilters
