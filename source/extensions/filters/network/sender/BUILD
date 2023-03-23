@@ -22,7 +22,8 @@ envoy_cc_library(
         "//envoy/network:filter_interface",
         "//source/common/common:assert_lib",
         "//source/common/common:minimal_logger_lib",
-        "//source/common/buffer:buffer_lib"
+        "//source/common/buffer:buffer_lib",
+        "//envoy/event:dispatcher_interface"
     ],
 )
 

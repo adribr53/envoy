@@ -31,14 +31,16 @@ private:
     auto& cluster_manager = context.clusterManager();
     auto* cluster = cluster_manager.getThreadLocalCluster(destination_cluster);
 
+    Envoy::Thread::ThreadFactory& thread_factory = context.api().threadFactory();
+
     if (cluster != nullptr) {
       const auto host = cluster->loadBalancer().chooseHost(nullptr);
       if (host != nullptr) {
         const auto address = host->address();
         ENVOY_LOG(info, "DESTINATION ADDRESS: {}:{}", address->ip()->addressAsString(), address->ip()->port());
         
-        return [address](Network::FilterManager& filter_manager) -> void {
-          auto sender_filter = std::make_shared<SenderFilter>(address->ip()->addressAsString(), address->ip()->port());
+        return [address, &thread_factory](Network::FilterManager& filter_manager) -> void {
+          auto sender_filter = std::make_shared<SenderFilter>(address->ip()->addressAsString(), address->ip()->port(), thread_factory);
           filter_manager.addReadFilter(sender_filter);
           filter_manager.addWriteFilter(sender_filter);
         };
