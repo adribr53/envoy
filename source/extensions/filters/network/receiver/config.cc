@@ -24,34 +24,14 @@ public:
 
 private:
   Network::FilterFactoryCb
-  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::receiver::v3::Receiver& proto_config,
+  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::receiver::v3::Receiver&,
                                     Server::Configuration::FactoryContext& context) override {
-
-    const auto& destination_cluster = proto_config.destination_cluster();
-    auto& cluster_manager = context.clusterManager();
-    auto* cluster = cluster_manager.getThreadLocalCluster(destination_cluster);
-
-    Envoy::Thread::ThreadFactory& thread_factory = context.api().threadFactory();
-
-    if (cluster != nullptr) {
-      const auto host = cluster->loadBalancer().chooseHost(nullptr);
-      if (host != nullptr) {
-        const auto address = host->address();
-        ENVOY_LOG(info, "DESTINATION ADDRESS: {}:{}", address->ip()->addressAsString(), address->ip()->port());
-        
-        return [address, &thread_factory](Network::FilterManager& filter_manager) -> void {
-          auto receiver_filter = std::make_shared<ReceiverFilter>(address->ip()->addressAsString(), address->ip()->port(), thread_factory);
-          filter_manager.addReadFilter(receiver_filter);
-          filter_manager.addWriteFilter(receiver_filter);
-        };
-      }
-      else {
-        throw EnvoyException("Unknown host");
-      }
-    }
-    else {
-      throw EnvoyException("Unknown cluster: " + destination_cluster);
-    }
+  Envoy::Thread::ThreadFactory& thread_factory = context.api().threadFactory();
+    return [&thread_factory](Network::FilterManager& filter_manager) -> void {
+      auto receiver_filter = std::make_shared<ReceiverFilter>(thread_factory);
+      filter_manager.addReadFilter(receiver_filter);
+      filter_manager.addWriteFilter(receiver_filter);
+    };  
   }
 
   bool isTerminalFilterByProtoTyped(const envoy::extensions::filters::network::receiver::v3::Receiver&,
