@@ -25,10 +25,9 @@ public:
 private:
   Network::FilterFactoryCb
   createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::receiver::v3::Receiver&,
-                                    Server::Configuration::FactoryContext& context) override {
-  Envoy::Thread::ThreadFactory& thread_factory = context.api().threadFactory();
-    return [&thread_factory](Network::FilterManager& filter_manager) -> void {
-      auto receiver_filter = std::make_shared<ReceiverFilter>(thread_factory);
+                                    Server::Configuration::FactoryContext&) override {
+    return [](Network::FilterManager& filter_manager) -> void {
+      auto receiver_filter = std::make_shared<ReceiverFilter>();
       filter_manager.addReadFilter(receiver_filter);
       filter_manager.addWriteFilter(receiver_filter);
     };  

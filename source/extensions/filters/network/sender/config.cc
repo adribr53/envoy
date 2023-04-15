@@ -16,17 +16,17 @@ namespace Sender {
  * Config registration for the sender filter. @see NamedNetworkFilterConfigFactory.
  */
 class SenderConfigFactory
-    : public Common::FactoryBase<envoy::extensions::filters::network::sender::v3::Sender> {
+    : public Common::FactoryBase<envoy::extensions::filters::network::sender::v3::Sender>,
+      Logger::Loggable<Logger::Id::filter> {
 public:
   SenderConfigFactory() : FactoryBase(NetworkFilterNames::get().Sender) {}
 
 private:
   Network::FilterFactoryCb
   createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::sender::v3::Sender&,
-                                    Server::Configuration::FactoryContext& context) override {
-    Envoy::Thread::ThreadFactory& thread_factory = context.api().threadFactory();
-    return [&thread_factory](Network::FilterManager& filter_manager) -> void {
-      auto sender_filter = std::make_shared<SenderFilter>(thread_factory);
+                                    Server::Configuration::FactoryContext&) override {
+    return [](Network::FilterManager& filter_manager) -> void {
+      auto sender_filter = std::make_shared<SenderFilter>();
       filter_manager.addReadFilter(sender_filter);
       filter_manager.addWriteFilter(sender_filter);
     };

@@ -31,6 +31,18 @@ static_resources:
                    address: 127.0.0.1
                    port_value: 3000
 
+  - name: cluster_memcached
+    connect_timeout: 60s
+    load_assignment:
+      cluster_name: cluster_server
+      endpoints:
+       - lb_endpoints:
+           - endpoint:
+               address:
+                 socket_address:
+                   address: 127.0.0.1
+                   port_value: 11211
+
   - name: cluster_listener2
     connect_timeout: 60s
     load_assignment:
@@ -58,4 +70,4 @@ static_resources:
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
               stat_prefix: destination
-              cluster: cluster_server # Can be changed by cluster_nginx
+              cluster: cluster_server # Can be changed by cluster_nginx or cluster_memcached
