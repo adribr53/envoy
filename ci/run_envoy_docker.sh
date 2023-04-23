@@ -44,6 +44,8 @@ else
   DOCKER_GID="$(stat -c %g /var/run/docker.sock 2>/dev/null || stat -f %g /var/run/docker.sock)"
   START_COMMAND=("/bin/bash" "-lc" "groupadd --gid ${DOCKER_GID} -f envoygroup \
     && useradd -o --uid $(id -u) --gid ${DOCKER_GID} --no-create-home --home-dir /build envoybuild \
+    && sudo apt update \
+    && sudo apt install -y libibverbs-dev \
     && usermod -a -G pcap envoybuild \
     && chown envoybuild:envoygroup /build \
     && chown envoybuild /proc/self/fd/2 \

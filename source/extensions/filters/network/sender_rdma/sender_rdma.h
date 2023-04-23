@@ -17,12 +17,12 @@
 #include <cstring>
 #include <thread>
 
-// #include <infinity/core/Context.h>
-// #include <infinity/queues/QueuePairFactory.h>
-// #include <infinity/queues/QueuePair.h>
-// #include <infinity/memory/Buffer.h>
-// #include <infinity/memory/RegionToken.h>
-// #include <infinity/requests/RequestToken.h>
+#include <infinity/core/Context.h>
+#include <infinity/queues/QueuePairFactory.h>
+#include <infinity/queues/QueuePair.h>
+#include <infinity/memory/Buffer.h>
+#include <infinity/memory/RegionToken.h>
+#include <infinity/requests/RequestToken.h>
 
 namespace Envoy {
 namespace Extensions {
@@ -106,7 +106,7 @@ public:
     }
 
     // This function will run in a thread and be responsible for RDMA polling
-    void rdma_polling() {
+    void rdma_polling() {        
         ENVOY_LOG(info, "rdma_polling launched");
 
         // Wait and accept incoming RDMA connection
@@ -116,7 +116,7 @@ public:
                 ENVOY_LOG(info, "Closed due to listen error");
                 close_procedure();
             }
-            ENVOY_LOG(info, "rdma_polling stopped");
+            ENVOY_LOG(info, "rdma_polling was stopped");
             return;
         }
 
