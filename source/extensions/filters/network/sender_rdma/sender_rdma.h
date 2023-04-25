@@ -103,6 +103,32 @@ public:
     // Constructor
     SenderRDMAFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
+        test_rdma();
+    }
+
+    void test_rdma() {
+        infinity::core::Context *context = new infinity::core::Context();
+        infinity::queues::QueuePairFactory *qpFactory = new infinity::queues::QueuePairFactory(context);
+        // infinity::queues::QueuePair *qpToPoll;
+        infinity::queues::QueuePair *qpToWrite;
+        const char* server_ip = "172.18.132.26";
+        uint32_t port_number = 8020;
+        uint32_t circle_size = 100;
+        const uint32_t payloadBound = 1500;
+        uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
+        uint32_t bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
+
+        qpToWrite = qpFactory->connectToRemoteHost(server_ip, port_number);
+        infinity::memory::RegionToken *remoteMemoryToken = (infinity::memory::RegionToken *) qpToWrite->getUserData();
+        ////printf("Creating buffers\n");
+        infinity::memory::Buffer *remoteMemory = new infinity::memory::Buffer(context, bufferSize);
+        char *remoteBuffer = (char *) remoteMemory->getData();
+        char *remoteHead = remoteBuffer + sizeof(uint32_t);
+        uint32_t *remotePosition = (uint32_t *) remoteBuffer;
+        uint32_t margin = (circle_size/2)-1;
+        uint32_t offset = 0;
+        ENVOY_LOG(debug, "CONNECTION RDMA ESTABLISHED");
+        ENVOY_LOG(debug, "CONNECTION RDMA HELLO");
     }
 
     // This function will run in a thread and be responsible for RDMA polling

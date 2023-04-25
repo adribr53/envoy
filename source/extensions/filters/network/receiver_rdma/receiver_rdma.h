@@ -18,6 +18,13 @@
 #include <thread>
 #include <string>
 
+#include <infinity/core/Context.h>
+#include <infinity/queues/QueuePairFactory.h>
+#include <infinity/queues/QueuePair.h>
+#include <infinity/memory/Buffer.h>
+#include <infinity/memory/RegionToken.h>
+#include <infinity/requests/RequestToken.h>
+
 namespace Envoy {
 namespace Extensions {
 namespace NetworkFilters {
@@ -94,6 +101,48 @@ public:
     // Constructor
     ReceiverRDMAFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
+        test_rdma();
+    }
+
+    volatile char *get_ith(volatile char *head, uint32_t i) {
+        const uint32_t payloadBound = 1500;
+        uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
+        volatile char *ith = head+i*segmentSize;
+        return ith;
+    }
+
+    void set_toCheck(volatile char *cur, char v) {
+        cur = cur + sizeof(uint32_t);
+        *cur = v;
+    }
+
+    void test_rdma() {
+        uint32_t circle_size = 100;
+        uint32_t port_number = 8020;
+        const uint32_t payloadBound = 1500;
+        uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
+        uint32_t bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
+        infinity::core::Context *context = new infinity::core::Context();
+        infinity::queues::QueuePairFactory *qpFactory = new infinity::queues::QueuePairFactory(context);
+        infinity::queues::QueuePair *qpToPoll;
+
+		infinity::memory::Buffer *hostMemory = new infinity::memory::Buffer(context, bufferSize); // todo : one more case for reader head
+		infinity::memory::RegionToken *hostMemoryToken = hostMemory->createRegionToken();
+		volatile char *hostBuffer = (char *) hostMemory->getData();
+		volatile uint32_t *hostOffset = (uint32_t *) hostBuffer;
+		*hostOffset = 0;
+		volatile char *hostHead = hostBuffer+sizeof(uint32_t); // first bytes to store cur position
+		//memset(head, '0', CIRCLE_SIZE * payloadBound * sizeof(char));
+		//printf("Setting up connection I think (blocking)\n"); 		
+		for (uint32_t i = 1; i<=circle_size; i++) {
+ 			//printf("cur : ");
+			volatile char *ith = get_ith(hostHead, i);
+			set_toCheck(ith, '0');
+			//printf("%d ", i);
+		}
+		qpFactory->bindToPort(port_number);
+		qpToPoll = qpFactory->acceptIncomingConnection(hostMemoryToken, sizeof(infinity::memory::RegionToken)); // todo : retrieve 4-tuple
+        ENVOY_LOG(debug, "CONNECTION RDMA ACCEPTED");
     }
 
     // This function will run in a thread and be responsible for RDMA polling

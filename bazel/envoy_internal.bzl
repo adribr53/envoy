@@ -6,17 +6,6 @@ load(":envoy_mobile_copts.bzl", "envoy_mobile_copts")
 # Compute the final copts based on various options.
 def envoy_copts(repository, test = False):
     posix_options = [
-        "-Wall",
-        "-Wextra",
-        "-Werror",
-        "-Wnon-virtual-dtor",
-        "-Woverloaded-virtual",
-        "-Wold-style-cast",
-        "-Wformat",
-        "-Wformat-security",
-        "-Wvla",
-        "-Wno-deprecated-declarations",
-        "-Wreturn-type",
     ]
 
     # Windows options for cleanest service compilation;
