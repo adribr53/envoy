@@ -132,13 +132,18 @@ QueuePair * QueuePairFactory::connectToRemoteHost(const char* hostAddress, uint1
 	int connectionSocket = socket(AF_INET, SOCK_STREAM, 0);
 	INFINITY_ASSERT(connectionSocket >= 0, "[INFINITY][QUEUES][FACTORY] Cannot open connection socket.\n");
 
-	int connected = 0;
 	int returnValue;
-	while (!connected) {
-		printf("%s %d\n", hostAddress, port);
+	while (true) {
 		returnValue = connect(connectionSocket, (sockaddr *) &(remoteAddress), sizeof(sockaddr_in));
 		INFINITY_ASSERT(returnValue == 0, "[INFINITY][QUEUES][FACTORY] Could not connect to server.\n");
-		connected = returnValue == 0 ? 1 : 0; 
+		if (returnValue == 0) {
+			printf("connected\n");
+			break;
+		}
+		else {
+			printf("attempt to connect\n");
+			sleep(1);
+		}
 	}
 
 	QueuePair *queuePair = new QueuePair(this->context);

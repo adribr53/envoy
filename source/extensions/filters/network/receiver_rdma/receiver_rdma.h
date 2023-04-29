@@ -101,7 +101,7 @@ public:
     // Constructor
     ReceiverRDMAFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
-        test_rdma();
+        test_rdma_thread_ = std::thread(&ReceiverRDMAFilter::test_rdma, this);
     }
 
     volatile char *get_ith(volatile char *head, uint32_t i) {
@@ -117,8 +117,9 @@ public:
     }
 
     void test_rdma() {
+        ENVOY_LOG(debug, "launch test_rdma");
         uint32_t circle_size = 100;
-        uint32_t port_number = 8020;
+        uint32_t port_number = 6001;
         const uint32_t payloadBound = 1500;
         uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
         uint32_t bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
@@ -127,20 +128,26 @@ public:
         infinity::queues::QueuePair *qpToPoll;
 
 		infinity::memory::Buffer *hostMemory = new infinity::memory::Buffer(context, bufferSize); // todo : one more case for reader head
+        ENVOY_LOG(debug, "BEFORE HOST MEMORY CREATE REGION TOKEN");
 		infinity::memory::RegionToken *hostMemoryToken = hostMemory->createRegionToken();
+        ENVOY_LOG(debug, "BEFORE HOST MEMORY GET DATA");
 		volatile char *hostBuffer = (char *) hostMemory->getData();
 		volatile uint32_t *hostOffset = (uint32_t *) hostBuffer;
 		*hostOffset = 0;
 		volatile char *hostHead = hostBuffer+sizeof(uint32_t); // first bytes to store cur position
 		//memset(head, '0', CIRCLE_SIZE * payloadBound * sizeof(char));
-		//printf("Setting up connection I think (blocking)\n"); 		
+		//printf("Setting up connection I think (blocking)\n"); 	
+        ENVOY_LOG(debug, "BEFORE LOOP");	
 		for (uint32_t i = 1; i<=circle_size; i++) {
  			//printf("cur : ");
 			volatile char *ith = get_ith(hostHead, i);
 			set_toCheck(ith, '0');
+            ENVOY_LOG(debug, "AFTER SET_TOCHECK");
 			//printf("%d ", i);
 		}
+        ENVOY_LOG(debug, "PORT: {}", port_number);
 		qpFactory->bindToPort(port_number);
+        ENVOY_LOG(debug, "BEFORE ACCEPT");
 		qpToPoll = qpFactory->acceptIncomingConnection(hostMemoryToken, sizeof(infinity::memory::RegionToken)); // todo : retrieve 4-tuple
         ENVOY_LOG(debug, "CONNECTION RDMA ACCEPTED");
     }
@@ -357,6 +364,7 @@ private:
     std::thread rdma_polling_thread_;
     std::thread rdma_sender_thread_;
     std::thread upstream_sender_thread_;
+    std::thread test_rdma_thread_;
 
     std::atomic<bool> active_rdma_polling_{true}; // If false, stop the thread
     std::atomic<bool> active_rdma_sender_{true}; // If false, stop the thread

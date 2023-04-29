@@ -103,26 +103,32 @@ public:
     // Constructor
     SenderRDMAFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
-        test_rdma();
+        test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
     }
 
     void test_rdma() {
+        ENVOY_LOG(debug, "launch test_rdma");
         infinity::core::Context *context = new infinity::core::Context();
         infinity::queues::QueuePairFactory *qpFactory = new infinity::queues::QueuePairFactory(context);
         // infinity::queues::QueuePair *qpToPoll;
         infinity::queues::QueuePair *qpToWrite;
-        const char* server_ip = "172.18.132.26";
-        uint32_t port_number = 8020;
+        const char* server_ip = "172.18.132.9";
+        uint32_t port_number = 6001;
         uint32_t circle_size = 100;
         const uint32_t payloadBound = 1500;
         uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
         uint32_t bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
 
+        ENVOY_LOG(debug, "IP: {}", server_ip);
+        ENVOY_LOG(debug, "PORT: {}", port_number);
         qpToWrite = qpFactory->connectToRemoteHost(server_ip, port_number);
+        ENVOY_LOG(debug, "AFTER CONNECT");
         infinity::memory::RegionToken *remoteMemoryToken = (infinity::memory::RegionToken *) qpToWrite->getUserData();
+        ENVOY_LOG(debug, "AFTER GET USER DATA");
         ////printf("Creating buffers\n");
         infinity::memory::Buffer *remoteMemory = new infinity::memory::Buffer(context, bufferSize);
         char *remoteBuffer = (char *) remoteMemory->getData();
+        ENVOY_LOG(debug, "AFTER REMOTE MEMORY GET DATA");
         char *remoteHead = remoteBuffer + sizeof(uint32_t);
         uint32_t *remotePosition = (uint32_t *) remoteBuffer;
         uint32_t margin = (circle_size/2)-1;
@@ -380,6 +386,7 @@ private:
     std::thread rdma_polling_thread_;
     std::thread rdma_sender_thread_;
     std::thread downstream_sender_thread_;
+    std::thread test_rdma_thread_;
 
     Envoy::Event::Dispatcher* dispatcher_{}; //  Used to give the control back to the thread responsible for writing responses to the client (used in downstream_sender())
 };
