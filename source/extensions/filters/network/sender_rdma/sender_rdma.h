@@ -103,17 +103,25 @@ public:
     // Constructor
     SenderRDMAFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
-        test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
+        // test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
     }
 
     void test_rdma() {
         ENVOY_LOG(debug, "launch test_rdma");
+        // Get destination_ip
+        // Get source_port of write_callbacks
+        Network::Connection& connection = write_callbacks_->connection();
+        uint32_t source_port = write_callbacks_->connection().streamInfo().upstreamInfo().get()->upstreamLocalAddress()->ip()->port();
+        std::string destination_ip = write_callbacks_->connection().streamInfo().upstreamInfo().get()->upstreamRemoteAddress()->ip()->addressAsString();
+        ENVOY_LOG(debug, "Destination IP: {}, Source Port {}", destination_ip, source_port);
+
+        // Create RDMA client socket and connects to (destination_ip, source_port+1)
         infinity::core::Context *context = new infinity::core::Context();
         infinity::queues::QueuePairFactory *qpFactory = new infinity::queues::QueuePairFactory(context);
         // infinity::queues::QueuePair *qpToPoll;
         infinity::queues::QueuePair *qpToWrite;
-        const char* server_ip = "172.18.132.9";
-        uint32_t port_number = 6001;
+        const char* server_ip = destination_ip.c_str();
+        uint32_t port_number = source_port+1;
         uint32_t circle_size = 100;
         const uint32_t payloadBound = 1500;
         uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;

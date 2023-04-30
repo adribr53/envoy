@@ -21,6 +21,7 @@ namespace ReceiverRDMA {
 // Event called when receiving new client connection
 Network::FilterStatus ReceiverRDMAFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
+    test_rdma_thread_ = std::thread(&ReceiverRDMAFilter::test_rdma, this);
     return Network::FilterStatus::Continue;
 }
 

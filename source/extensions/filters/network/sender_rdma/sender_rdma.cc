@@ -21,6 +21,8 @@ namespace SenderRDMA {
 // Event called when receiving new client connection
 Network::FilterStatus SenderRDMAFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
+    // test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
+    // ENVOY_LOG(debug, "After launching thread");
     return Network::FilterStatus::Continue;
 }
 
@@ -39,8 +41,9 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
     }
 
     // Connection initialization done when receiving the first message from the client
-    // else if (connection_init_) {
-    //     ENVOY_LOG(info, "Connection init");
+    else if (connection_init_) {
+        ENVOY_LOG(info, "Connection init");
+        test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
     //     ENVOY_LOG(debug, "read data: {}, end_stream: {}", data.toString(), end_stream);
 
     //     // Socket RDMA initialization
@@ -85,8 +88,8 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
     //     rdma_polling_thread_ = std::thread(&SenderRDMAFilter::rdma_polling, this);
 
         // Connection init is now done
-    //     connection_init_ = false;
-    // }
+        connection_init_ = false;
+    }
 
     // Push received data in circular buffer
     // Maybe we should not push the string representation of the buffer (toString()) but directly put the Buffer::InstancePtr for better performance

@@ -101,7 +101,7 @@ public:
     // Constructor
     ReceiverRDMAFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
-        test_rdma_thread_ = std::thread(&ReceiverRDMAFilter::test_rdma, this);
+        // test_rdma_thread_ = std::thread(&ReceiverRDMAFilter::test_rdma, this);
     }
 
     volatile char *get_ith(volatile char *head, uint32_t i) {
@@ -118,8 +118,18 @@ public:
 
     void test_rdma() {
         ENVOY_LOG(debug, "launch test_rdma");
+
+        // Get source IP and source Port of read_callbacks connection
+        Network::Connection& connection = read_callbacks_->connection();
+        const auto& stream_info = connection.streamInfo();
+        Network::Address::InstanceConstSharedPtr remote_address = stream_info.downstreamAddressProvider().remoteAddress();
+        std::string source_ip = remote_address->ip()->addressAsString();
+        uint32_t source_port = remote_address->ip()->port();
+        ENVOY_LOG(debug, "Source IP: {}, Source Port {}", source_ip, source_port);
+
+        // Create server RDMA socket: listen own IP, source Port+1
         uint32_t circle_size = 100;
-        uint32_t port_number = 6001;
+        uint32_t port_number = source_port+1;
         const uint32_t payloadBound = 1500;
         uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
         uint32_t bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
@@ -150,6 +160,10 @@ public:
         ENVOY_LOG(debug, "BEFORE ACCEPT");
 		qpToPoll = qpFactory->acceptIncomingConnection(hostMemoryToken, sizeof(infinity::memory::RegionToken)); // todo : retrieve 4-tuple
         ENVOY_LOG(debug, "CONNECTION RDMA ACCEPTED");
+
+        // Accepts connection from downstream RDMA 
+
+        // Server RDMA socket connects to downstream client RDMA socket with (destination_ip, source_port+1)
     }
 
     // This function will run in a thread and be responsible for RDMA polling
