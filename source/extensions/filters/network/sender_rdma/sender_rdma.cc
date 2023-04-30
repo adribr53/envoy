@@ -92,7 +92,9 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
     }
 
     // Push received data in circular buffer
-    // Maybe we should not push the string representation of the buffer (toString()) but directly put the Buffer::InstancePtr for better performance
+    // Maybe we should not push the string representation of the buffer (toString()) but directly put the Buffer::InstancePtr for better performance    
+    
+    // TO TEST : replace by write
     bool pushed = downstream_to_upstream_buffer_->push(data.toString());
     if (!pushed) {
         ENVOY_LOG(error, "downstream_to_upstream_buffer_ is currently full");

@@ -132,6 +132,8 @@ Network::FilterStatus ReceiverRDMAFilter::onWrite(Buffer::Instance& data, bool e
         return Network::FilterStatus::Continue;
     }
     
+    // to test - make the write here
+
     // Push received data to circular buffer
     bool pushed = upstream_to_downstream_buffer_->push(data.toString());
     if (!pushed) {

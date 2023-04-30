@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <thread>
+#include <chrono>
 
 #include <infinity/core/Context.h>
 #include <infinity/queues/QueuePairFactory.h>
@@ -106,6 +107,36 @@ public:
         // test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
     }
 
+    void set_length(volatile char *cur, uint32_t length) {
+        uint32_t *ptr = (uint32_t *) (cur + sizeof(uint32_t) + sizeof(char));
+        *ptr = htonl(length);
+    }
+
+    volatile char *get_ith(volatile char *head, uint32_t i) {
+        volatile char *ith = head+i*segmentSize;
+        return ith;
+    }
+
+    uint32_t get_length(volatile char *cur) {
+        cur = cur + sizeof(uint32_t) + sizeof(char);
+        return ntohl(*((uint32_t *)cur));
+    }
+
+    char get_toCheck(volatile char *cur) {
+        cur = cur + sizeof(uint32_t);
+        return *cur;
+    }
+
+    char *get_ith(char *head, uint32_t i) {	
+        char *ith = head+i*segmentSize;
+        return ith;
+    }
+
+    void set_toCheck(volatile char *cur, char v) {
+        cur = cur + sizeof(uint32_t);
+        *cur = v;
+    }
+
     void test_rdma() {
         ENVOY_LOG(debug, "launch test_rdma");
         // Get destination_ip
@@ -116,140 +147,150 @@ public:
         ENVOY_LOG(debug, "Destination IP: {}, Source Port {}", destination_ip, source_port);
 
         // Create RDMA client socket and connects to (destination_ip, source_port+1)
-        infinity::core::Context *context = new infinity::core::Context();
-        infinity::queues::QueuePairFactory *qpFactory = new infinity::queues::QueuePairFactory(context);
-        // infinity::queues::QueuePair *qpToPoll;
-        infinity::queues::QueuePair *qpToWrite;
-        const char* server_ip = destination_ip.c_str();
-        uint32_t port_number = source_port+1;
-        uint32_t circle_size = 100;
-        const uint32_t payloadBound = 1500;
-        uint32_t segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
-        uint32_t bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
+        context = new infinity::core::Context();
+        qpFactory = new infinity::queues::QueuePairFactory(context);        
+        server_ip = destination_ip.c_str();
+        port_number = source_port+1;
+        circle_size = 100;
+        segmentSize = 2*sizeof(uint32_t)+sizeof(char)+payloadBound;
+        bufferSize = (circle_size * segmentSize )+sizeof(uint32_t);
 
         ENVOY_LOG(debug, "IP: {}", server_ip);
         ENVOY_LOG(debug, "PORT: {}", port_number);
         qpToWrite = qpFactory->connectToRemoteHost(server_ip, port_number);
         ENVOY_LOG(debug, "AFTER CONNECT");
-        infinity::memory::RegionToken *remoteMemoryToken = (infinity::memory::RegionToken *) qpToWrite->getUserData();
+        remoteMemoryToken = (infinity::memory::RegionToken *) qpToWrite->getUserData();
         ENVOY_LOG(debug, "AFTER GET USER DATA");
         ////printf("Creating buffers\n");
-        infinity::memory::Buffer *remoteMemory = new infinity::memory::Buffer(context, bufferSize);
-        char *remoteBuffer = (char *) remoteMemory->getData();
+        remoteMemory = new infinity::memory::Buffer(context, bufferSize);
+        remoteBuffer = (char *) remoteMemory->getData();
         ENVOY_LOG(debug, "AFTER REMOTE MEMORY GET DATA");
-        char *remoteHead = remoteBuffer + sizeof(uint32_t);
-        uint32_t *remotePosition = (uint32_t *) remoteBuffer;
-        uint32_t margin = (circle_size/2)-1;
-        uint32_t offset = 0;
+        remoteHead = remoteBuffer + sizeof(uint32_t);
+        remotePosition = (uint32_t *) remoteBuffer;
+        margin = (circle_size/2)-1;
+        offset = 0;
         ENVOY_LOG(debug, "CONNECTION RDMA ESTABLISHED");
         ENVOY_LOG(debug, "CONNECTION RDMA HELLO");
-    }
 
-    // This function will run in a thread and be responsible for RDMA polling
-    void rdma_polling() {        
-        ENVOY_LOG(info, "rdma_polling launched");
-
-        // Wait and accept incoming RDMA connection
-        if (listen(sock_rdma_, 1) < 0) {
-            ENVOY_LOG(error, "listen error");
-            if (!connection_close_) {
-                ENVOY_LOG(info, "Closed due to listen error");
-                close_procedure();
-            }
-            ENVOY_LOG(info, "rdma_polling was stopped");
-            return;
-        }
-
-        struct sockaddr_in client_addr;
-        socklen_t client_addr_len = sizeof(client_addr);
-        ENVOY_LOG(info, "Waiting for incoming RDMA connection...");
-        // sock_distant_rdma_ is used to communicate with upstream RDMA
-        sock_distant_rdma_ = accept(sock_rdma_, reinterpret_cast<struct sockaddr*>(&client_addr), &client_addr_len);
-        if (sock_distant_rdma_ < 0) {
-            ENVOY_LOG(error, "accept error");
-            if (!connection_close_) {
-                ENVOY_LOG(info, "Closed due to accept error");
-                close_procedure();
-            }
-            ENVOY_LOG(info, "rdma_polling stopped");
-            return;
-        }
-        ENVOY_LOG(info, "RDMA Connection from upstream proxy accepted");
-
-        // Launch RDMA sender thread
         rdma_sender_thread_ = std::thread(&SenderRDMAFilter::rdma_sender, this);
 
-        // Launch downstream sender thread
+        // let's create the other chanel
+        hostMemory = new infinity::memory::Buffer(context, bufferSize); // todo : one more case for reader head
+		hostMemoryToken = hostMemory->createRegionToken();
+		hostBuffer = (char *) hostMemory->getData();
+		hostOffset = (uint32_t *) hostBuffer;
+		*hostOffset = 0;
+		hostHead = hostBuffer+sizeof(uint32_t); // first bytes to store cur position
+		//memset(head, '0', CIRCLE_SIZE * payloadBound * sizeof(char));
+		//printf("Setting up connection I think (blocking)\n"); 		
+		for (uint32_t i = 1; i<=circle_size; i++) {
+ 			//printf("cur : ");
+			volatile char *ith = get_ith(hostHead, i);
+			set_toCheck(ith, '0');
+			//printf("%d ", i);
+		}
+        qpFactory->bindToPort(port_number);
+		qpToPoll = qpFactory->acceptIncomingConnection(hostMemoryToken, sizeof(infinity::memory::RegionToken)); // todo : retrieve 4-tuple
+        ENVOY_LOG(debug, "CONNECTION RDMA 2 ESTABLISHED");
+
+        rdma_polling_thread_ = std::thread(&SenderRDMAFilter::rdma_polling, this);
         downstream_sender_thread_ = std::thread(&SenderRDMAFilter::downstream_sender, this);
+    }
 
-        // Start polling
-        const int BUFFER_SIZE = 1024;
-        char buffer[BUFFER_SIZE];
-        int bytes_received;
-
-        struct pollfd poll_fds[1];
-        poll_fds[0].fd = sock_distant_rdma_;
-        poll_fds[0].events = POLLIN;
-
-        while (true) {
-            // Poll data
-            int ret = poll(poll_fds, 1, 3000); // Timeout after 3 seconds if no received data
-
-            if (ret < 0) {
-                ENVOY_LOG(error, "poll error");
-                if (!connection_close_) {
-                    ENVOY_LOG(info, "Closed due to poll error");
-                    close_procedure();
-                }
+    void rdma_polling() {
+        ENVOY_LOG(debug, "rdma_polling launched");
+        uint32_t actualOffset = 0;		
+	    uint32_t writtenOffset = 0;
+	    int cnt = 0;
+        
+	    auto cur = std::chrono::high_resolution_clock::now();
+	    while (1) {	
+            volatile char *ith = get_ith(hostHead, actualOffset);
+            auto ms = std::chrono::duration_cast<std::chrono::seconds>(cur.time_since_epoch()).count();
+            if (ms>10) {
                 break;
             }
+            if (get_toCheck(ith)=='1') {                
+                set_toCheck(ith, '0');
+                *hostOffset = (*hostOffset+1) % circle_size;
+                actualOffset = (actualOffset+1) % circle_size;
+                if (actualOffset-writtenOffset>circle_size/2 || writtenOffset-actualOffset>circle_size/2) {
+                    writtenOffset = actualOffset;
+                    // write in the other's memory 
+                } 			   
 
-            // If timeout and flag false: stop thread
-            else if (ret == 0 && !active_rdma_polling_) {
-                break;
-            }
-
-            // Receive data on the socket
-            else if (poll_fds[0].revents & POLLIN) {
-                memset(buffer, '\0', BUFFER_SIZE);
-                bytes_received = recv(sock_distant_rdma_, buffer, BUFFER_SIZE, 0);
-                if (bytes_received < 0) {
-                    ENVOY_LOG(debug, "Error receiving message from RDMA upstream");
-                    break;
-                } 
-                else if (bytes_received == 0) {
-                    ENVOY_LOG(debug, "RDMA upstream closed the connection");
-                    break;
-                }
-                std::string message(buffer, bytes_received); // Put the received data in a string
-                ENVOY_LOG(debug, "Received message from RDMA upstream: {}", message);
-
-                // Push the message for the downstream
+                std::string message((char*) get_payload(ith), get_length(ith)); // Put the received data in a string
+                ENVOY_LOG(debug, "Received message from RDMA downstream: {}", message);
+                
                 bool pushed = upstream_to_downstream_buffer_->push(message);
                 if (!pushed) {
-                    ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+                    ENVOY_LOG(error, "downstream_to_upstream_buffer_ is currently full");
                     if (!connection_close_) {
-                        ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+                        ENVOY_LOG(info, "Closed due to full downstream_to_upstream_buffer_");
                         close_procedure();
                     }
                     break;
                 }
-            }
-        }
-        ENVOY_LOG(info, "rdma_polling stopped");
+
+//                write(accessConnfd, (const void*) get_payload(ith), get_length(ith));
+                cnt++;
+                cur = std::chrono::high_resolution_clock::now();
+	        }
+		    //printf("%d\n", cnt);
+	    };
+        ENVOY_LOG(debug, "rdma_polling stopped");
     }
 
+    int can_write(uint32_t offset, uint32_t serverPos, uint32_t margin) {
+        if (offset<serverPos) {
+            offset+=circle_size;
+        }
+        return (offset-serverPos) < margin;
+    }
+
+    volatile char *get_payload(volatile char *cur) {
+        cur = cur + sizeof(uint32_t) + sizeof(char) + sizeof(uint32_t);
+        return cur;
+    }
+
+    char *get_payload(char *cur) {
+        cur = cur + sizeof(uint32_t) + sizeof(char) + sizeof(uint32_t);
+        return cur;
+    }
+    
     // This function will run in a thread and be responsible for sending to upstream through RDMA
     void rdma_sender() {
+        // RDMA utils
+        char *curSegment;
+        uint32_t offset = 0;
+        uint32_t cnt = 0;
+        infinity::requests::RequestToken requestToken(context);
+        int hasRead = 0;
+        int cntRead = 0;
+
         ENVOY_LOG(info, "rdma_sender launched");
         while (true) {
+            if (!can_write(offset, *remotePosition, margin)) {
+                cntRead++;
+                qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint32_t), nullptr);
+                hasRead=1;
+                continue;
+            }
             std::string item;
             if (downstream_to_upstream_buffer_->pop(item)) {
                 ENVOY_LOG(debug, "Got item: {}", item);
-                if (send(sock_distant_rdma_, item.c_str(), size(item), 0) < 0) {
-                    ENVOY_LOG(debug, "Error sending RDMA message");
-                    continue;
-                }
+                curSegment = get_ith(remoteHead, offset);
+                memcpy(get_payload(curSegment), item.c_str(), item.size());
+
+                set_toCheck(curSegment, '1');
+		        uint32_t writeOffset = sizeof(uint32_t) + (segmentSize * offset);
+		        set_length(curSegment, item.size());	
+                
+                uint32_t writeLength = 2*sizeof(uint32_t)+sizeof(char)+item.size();
+                qpToWrite->write(remoteMemory, writeOffset, remoteMemoryToken, writeOffset, writeLength, infinity::queues::OperationFlags(), &requestToken);
+                offset = (offset + 1) % circle_size;
+
+                requestToken.waitUntilCompleted();
             }
             else { // No item was retrieved after 3 seconds
                 if (!active_rdma_sender_) { // If timeout and flag false: stop thread
@@ -270,6 +311,7 @@ public:
                 
                 // Use dispatcher and locking to ensure that the right thread executes the task (writing responses to the client)
                 // Asynchronous task
+                // TO TEST : put this in rdma polling instead
                 auto weak_self = weak_from_this();
                 dispatcher_->post([weak_self, buffer = std::make_shared<Buffer::OwnedImpl>(item)]() -> void {
                     if (auto self = weak_self.lock()) {
@@ -350,7 +392,7 @@ public:
         bool pop(T& item) {
             std::unique_lock<std::mutex> lock(mutex_);
             if (size_ == 0) {
-                if (!cv_.wait_for(lock, std::chrono::seconds(3), [this] { return size_ > 0; })) {
+                if (!cv_.wait_for(lock, std::chrono::seconds(10), [this] { return size_ > 0; })) {
                     return false; // buffer is still empty after 3 seconds
                 }
             }
@@ -383,6 +425,31 @@ private:
     std::atomic<bool> connection_close_{false}; // Keep track of connection state
     int sock_rdma_;
     int sock_distant_rdma_; // RDMA socket to communicate with upstream RDMA
+
+    // RDMA stuff
+    infinity::core::Context *context;
+    infinity::queues::QueuePairFactory *qpFactory;
+    infinity::queues::QueuePair *qpToPoll;
+    infinity::queues::QueuePair *qpToWrite;
+    const char* server_ip;
+    uint32_t port_number;
+    uint32_t circle_size;
+    const uint32_t payloadBound = 1500;
+    uint32_t segmentSize;
+    uint32_t bufferSize;
+    infinity::memory::RegionToken *remoteMemoryToken;
+    infinity::memory::Buffer *remoteMemory;
+    char *remoteBuffer;    
+    char *remoteHead;
+    uint32_t *remotePosition;
+    uint32_t margin;
+    uint32_t offset;
+    infinity::memory::Buffer *hostMemory;
+	infinity::memory::RegionToken *hostMemoryToken;
+	volatile char *hostBuffer;
+	volatile uint32_t *hostOffset;	
+	volatile char *hostHead;
+
 
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by onData() and consumed by the RDMA sender thread
     std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by RDMA polling thread and consumed by downstream sender thread
