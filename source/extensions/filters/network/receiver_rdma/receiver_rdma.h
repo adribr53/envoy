@@ -96,7 +96,14 @@ public:
     // Destructor
     ~ReceiverRDMAFilter() {
         ENVOY_LOG(info, "DESTRUCTOR");
-        close(sock_rdma_);
+        delete qpFactory;
+	    delete context;	    
+        delete qpToPoll;
+        delete qpToWrite;
+        delete remoteMemory;
+        delete hostMemory;
+        delete remoteMemoryToken;
+        delete hostMemoryToken;
     }
 
     // Constructor
@@ -280,11 +287,18 @@ public:
         // cur clock = clock();
         auto cur = std::chrono::high_resolution_clock::now();
 	    while (1) {	
+            if (!active_rdma_polling_) {
+                ENVOY_LOG(debug, "break0");
+                break;
+            }
             volatile char *ith = get_ith(hostHead, actualOffset);
 
             auto ms = std::chrono::duration_cast<std::chrono::seconds>(cur.time_since_epoch()).count();
-            if (ms>10) {
-                break;
+            if (ms>6000) {
+                if (!active_rdma_polling_) {
+                    ENVOY_LOG(debug, "break");
+                    break;
+                }
             }
 
             if (get_toCheck(ith)=='1') {                
