@@ -21,7 +21,7 @@ namespace SenderRDMA {
 // Event called when receiving new client connection
 Network::FilterStatus SenderRDMAFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
-    // test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
+    // setup_rdma_thread_ = std::thread(&SenderRDMAFilter::setup_rdma, this);
     // ENVOY_LOG(debug, "After launching thread");
     return Network::FilterStatus::Continue;
 }
@@ -43,7 +43,7 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
     // Connection initialization done when receiving the first message from the client
     else if (connection_init_) {
         ENVOY_LOG(info, "Connection init");
-        test_rdma_thread_ = std::thread(&SenderRDMAFilter::test_rdma, this);
+        setup_rdma_thread_ = std::thread(&SenderRDMAFilter::setup_rdma, this);
     //     ENVOY_LOG(debug, "read data: {}, end_stream: {}", data.toString(), end_stream);
 
     //     // Socket RDMA initialization
