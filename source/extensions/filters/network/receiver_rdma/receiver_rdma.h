@@ -344,17 +344,20 @@ public:
 
         ENVOY_LOG(info, "rdma_sender launched");
         while (true) {
-            if (!can_write(offset, *remotePosition, margin)) {
-                cntRead++;
-                qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint32_t), nullptr);
-                hasRead=1;
-                continue;
-            }
             std::string item;
             if (upstream_to_downstream_buffer_->pop(item)) {
                 ENVOY_LOG(debug, "Got item: {}", item);
+
+                if (!can_write(offset, *remotePosition, margin)) {
+                    cntRead++;
+                    qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint32_t), nullptr);
+                    hasRead=1;
+                    continue;
+                }
+
                 curSegment = get_ith(remoteHead, offset);
                 memcpy(get_payload(curSegment), item.c_str(), item.size());
+                ENVOY_LOG(debug, "item size: {}", item.size());
 
                 set_toCheck(curSegment, '1');
 		        uint32_t writeOffset = sizeof(uint32_t) + (segmentSize * offset);
@@ -385,6 +388,7 @@ public:
             std::string item;
             if (downstream_to_upstream_buffer_->pop(item)) {
                 ENVOY_LOG(debug, "Got item: {}", item);
+                ENVOY_LOG(debug, "item size: {}", item.size());
 
                 // Use dispatcher and locking to ensure that the right thread executes the task (sending requests to the server)
                 // Asynchronous task

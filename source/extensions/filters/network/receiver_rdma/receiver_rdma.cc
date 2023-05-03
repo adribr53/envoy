@@ -134,15 +134,39 @@ Network::FilterStatus ReceiverRDMAFilter::onWrite(Buffer::Instance& data, bool e
     
     // to test - make the write here
 
-    // Push received data to circular buffer
-    bool pushed = upstream_to_downstream_buffer_->push(data.toString());
-    if (!pushed) {
-        ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
-        if (!connection_close_) {
-            ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
-            close_procedure();
+    ENVOY_LOG(debug, "data length: {}", data.length());
+    const uint64_t chunk_size = 1500; // chunk size in bytes
+    uint64_t bytes_processed = 0;
+    while (data.length() > 0) {
+        // Get the next chunk of data
+        uint64_t bytes_to_process = std::min(data.length(), chunk_size);
+        Buffer::OwnedImpl chunk_data;
+        // data.move(chunk_data, bytes_to_process);
+        chunk_data.move(data, bytes_to_process);
+        ENVOY_LOG(debug, "data length: {}", data.length());
+
+        bool pushed = upstream_to_downstream_buffer_->push(chunk_data.toString());
+        if (!pushed) {
+            ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+                close_procedure();
+            }
         }
+
+        bytes_processed += bytes_to_process;
+        ENVOY_LOG(debug, "bytes_processed: {}", bytes_processed);
     }
+
+    // // Push received data to circular buffer
+    // bool pushed = upstream_to_downstream_buffer_->push(data.toString());
+    // if (!pushed) {
+    //     ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+    //     if (!connection_close_) {
+    //         ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+    //         close_procedure();
+    //     }
+    // }
 
     // Drain write buffer
     data.drain(data.length());

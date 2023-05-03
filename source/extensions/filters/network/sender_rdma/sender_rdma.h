@@ -234,13 +234,13 @@ public:
                 } 			   
 
                 std::string message((char*) get_payload(ith), get_length(ith)); // Put the received data in a string
-                ENVOY_LOG(debug, "Received message from RDMA downstream: {}", message);
+                ENVOY_LOG(debug, "Received message from RDMA upstream: {}", message);
                 
                 bool pushed = upstream_to_downstream_buffer_->push(message);
                 if (!pushed) {
-                    ENVOY_LOG(error, "downstream_to_upstream_buffer_ is currently full");
+                    ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
                     if (!connection_close_) {
-                        ENVOY_LOG(info, "Closed due to full downstream_to_upstream_buffer_");
+                        ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
                         close_procedure();
                     }
                     break;
@@ -284,17 +284,20 @@ public:
 
         ENVOY_LOG(info, "rdma_sender launched");
         while (true) {
-            if (!can_write(offset, *remotePosition, margin)) {
-                cntRead++;
-                qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint32_t), nullptr);
-                hasRead=1;
-                continue;
-            }
             std::string item;
             if (downstream_to_upstream_buffer_->pop(item)) {
                 ENVOY_LOG(debug, "Got item: {}", item);
+
+                if (!can_write(offset, *remotePosition, margin)) {
+                    cntRead++;
+                    qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint32_t), nullptr);
+                    hasRead=1;
+                    continue;
+                }
+
                 curSegment = get_ith(remoteHead, offset);
                 memcpy(get_payload(curSegment), item.c_str(), item.size());
+                ENVOY_LOG(debug, "item size: {}", item.size());
 
                 set_toCheck(curSegment, '1');
 		        uint32_t writeOffset = sizeof(uint32_t) + (segmentSize * offset);
@@ -322,6 +325,7 @@ public:
             std::string item;
             if (upstream_to_downstream_buffer_->pop(item)) {
                 ENVOY_LOG(debug, "Got item: {}", item);
+                ENVOY_LOG(debug, "item size: {}", item.size());
                 
                 // Use dispatcher and locking to ensure that the right thread executes the task (writing responses to the client)
                 // Asynchronous task
