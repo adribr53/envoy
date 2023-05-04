@@ -54,11 +54,21 @@ Network::FilterStatus SenderFilter::onData(Buffer::Instance& data, bool end_stre
             return Network::FilterStatus::StopIteration;
         }
 
+        Network::Connection& connection = write_callbacks_->connection();
+        uint32_t sourcePort = write_callbacks_->connection().streamInfo().upstreamInfo().get()->upstreamLocalAddress()->ip()->port();
+        std::string destinationIp = write_callbacks_->connection().streamInfo().upstreamInfo().get()->upstreamRemoteAddress()->ip()->addressAsString();
+        ENVOY_LOG(debug, "Destination IP: {}, Source Port {}", destinationIp, sourcePort);               
+        const char*  serverIp = destinationIp.c_str();
+        uint32_t serverPort = sourcePort+1;        
+        ENVOY_LOG(debug, "IP: {}", serverIp);
+        ENVOY_LOG(debug, "PORT: {}", serverPort);
+
         struct sockaddr_in addr;
         socklen_t addr_len = sizeof(addr);
         addr.sin_family = AF_INET;
+        // addr.sin_addr.s_addr = inet_addr(serverIp);
         addr.sin_addr.s_addr = htonl(INADDR_ANY);
-        addr.sin_port = 0;  // 0 means that the system will assign a free port number
+        addr.sin_port = htons(serverPort);
         if (bind(sock_rdma_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
             ENVOY_LOG(error, "bind error");
             if (!connection_close_) {
@@ -75,11 +85,11 @@ Network::FilterStatus SenderFilter::onData(Buffer::Instance& data, bool end_stre
             }
             return Network::FilterStatus::StopIteration;
         }
-        // Send port number of RDMA socket to upstream proxy
-        std::string port = std::to_string(ntohs(addr.sin_port));
-        Buffer::OwnedImpl port_number(port);
-        read_callbacks_->injectReadDataToFilterChain(port_number, end_stream);
-        ENVOY_LOG(info, "RDMA port: {}", port);
+        // // Send port number of RDMA socket to upstream proxy
+        // std::string port = std::to_string(ntohs(addr.sin_port));
+        // Buffer::OwnedImpl port_number(port);
+        // read_callbacks_->injectReadDataToFilterChain(port_number, end_stream);
+        // ENVOY_LOG(info, "RDMA port: {}", port);
 
         // Launch RDMA polling thread
         rdma_polling_thread_ = std::thread(&SenderFilter::rdma_polling, this);

@@ -96,6 +96,72 @@ public:
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
     }
 
+    void setup_connection() {
+        ENVOY_LOG(info, "Connection init");
+
+        // Get source IP and source Port of read_callbacks connection
+        Network::Connection& connection = read_callbacks_->connection();
+        const auto& stream_info = connection.streamInfo();
+        Network::Address::InstanceConstSharedPtr remote_address = stream_info.downstreamAddressProvider().remoteAddress();
+        std::string source_ip = remote_address->ip()->addressAsString();
+        uint32_t source_port = remote_address->ip()->port();
+        ENVOY_LOG(debug, "Source IP: {}, Source Port {}", source_ip, source_port);
+
+        // Connect to RDMA downstream using the received port
+        struct sockaddr_in downstream_address_;
+        uint32_t downstream_port = source_port+1;
+        downstream_address_.sin_family = AF_INET;
+        downstream_address_.sin_port = htons(downstream_port);
+        ENVOY_LOG(debug, "DOWNSTREAM IP: {}, Port: {}", source_ip, downstream_port);
+
+        if (inet_pton(AF_INET, source_ip.c_str(), &downstream_address_.sin_addr) < 0) {
+            ENVOY_LOG(error, "error inet_pton");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to inet_pton");
+                close_procedure();
+            }
+            return;
+        }
+
+        // Try to connect to RDMA downstream (try for 10 seconds)
+        int count = 0;
+        sock_rdma_ = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock_rdma_ < 0) {
+            ENVOY_LOG(error, "error creating sock_rdma_");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to error creating sock_rdma_");
+                close_procedure();
+            }
+            return;
+        }
+        while ((connect(sock_rdma_, reinterpret_cast<struct sockaddr*>(&downstream_address_), sizeof(downstream_address_ ))) != 0) {
+            if (count >= 10) {
+                ENVOY_LOG(error, "RDMA failed to connect to downstream");
+                if (!connection_close_) {
+                    ENVOY_LOG(info, "Closed due to RDMA failed to connect to downstream");
+                    close_procedure();
+                }
+                return;
+            }
+            ENVOY_LOG(info, "RETRY CONNECTING TO RDMA DOWNSTREAM...");
+            sleep(1);
+            count++;
+        }
+        ENVOY_LOG(info, "CONNECTED TO RDMA DOWNSTREAM");
+
+        // Launch RDMA polling thread
+        rdma_polling_thread_ = std::thread(&ReceiverFilter::rdma_polling, this);
+
+        // Launch RDMA sender thread
+        rdma_sender_thread_ = std::thread(&ReceiverFilter::rdma_sender, this);
+
+        // Launch upstream sender thread
+        upstream_sender_thread_ = std::thread(&ReceiverFilter::upstream_sender, this);
+        
+        // Connection init is now done
+        connection_init_ = false;
+    }
+
     // This function will run in a thread and be responsible for RDMA polling
     void rdma_polling() {
         ENVOY_LOG(info, "rdma_polling launched");
@@ -308,6 +374,7 @@ private:
     std::thread rdma_polling_thread_;
     std::thread rdma_sender_thread_;
     std::thread upstream_sender_thread_;
+    std::thread setup_connection_thread_;
 
     std::atomic<bool> active_rdma_polling_{true}; // If false, stop the thread
     std::atomic<bool> active_rdma_sender_{true}; // If false, stop the thread
