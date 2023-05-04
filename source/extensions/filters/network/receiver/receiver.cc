@@ -21,7 +21,8 @@ namespace Receiver {
 // Event called when receiving new client connection
 Network::FilterStatus ReceiverFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
-    setup_connection_thread_ = std::thread(&ReceiverFilter::setup_connection, this);
+    // setup_connection_thread_ = std::thread(&ReceiverFilter::setup_connection, this);
+    setup_connection();
     return Network::FilterStatus::Continue;
 }
 

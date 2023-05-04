@@ -97,7 +97,7 @@ public:
     }
 
     void setup_connection() {
-        ENVOY_LOG(info, "Connection init");
+        ENVOY_LOG(info, "setup_connection launched");
 
         // Get source IP and source Port of read_callbacks connection
         Network::Connection& connection = read_callbacks_->connection();
@@ -160,6 +160,18 @@ public:
         
         // Connection init is now done
         connection_init_ = false;
+
+        // if (rdma_polling_thread_.joinable()) {
+        //     rdma_polling_thread_.join();
+        // }
+        // if (rdma_sender_thread_.joinable()) {
+        //     rdma_sender_thread_.join();
+        // }
+        // if (upstream_sender_thread_.joinable()) {
+        //     upstream_sender_thread_.join();
+        // }
+
+        ENVOY_LOG(info, "setup_connection terminated");
     }
 
     // This function will run in a thread and be responsible for RDMA polling
@@ -288,6 +300,9 @@ public:
         if (upstream_sender_thread_.joinable()) {
             upstream_sender_thread_.join();
         }
+        // if (setup_connection_thread_.joinable()) {
+        //     setup_connection_thread_.join();
+        // }
         ENVOY_LOG(info, "All threads terminated");
 
         ENVOY_LOG(info, "upstream_to_downstream_buffer_ size: {}", upstream_to_downstream_buffer_->getSize()); // Should always be 0

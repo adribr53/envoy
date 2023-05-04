@@ -21,8 +21,7 @@ namespace SenderRDMA {
 // Event called when receiving new client connection
 Network::FilterStatus SenderRDMAFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
-    // setup_rdma_thread_ = std::thread(&SenderRDMAFilter::setup_rdma, this);
-    // ENVOY_LOG(debug, "After launching thread");
+    // TODO : launch setup_rdma() here if possible
     return Network::FilterStatus::Continue;
 }
 
@@ -43,49 +42,7 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
     // Connection initialization done when receiving the first message from the client
     else if (connection_init_) {
         ENVOY_LOG(info, "Connection init");
-        setup_rdma_thread_ = std::thread(&SenderRDMAFilter::setup_rdma, this);
-    //     ENVOY_LOG(debug, "read data: {}, end_stream: {}", data.toString(), end_stream);
-
-    //     // Socket RDMA initialization
-    //     sock_rdma_ = socket(AF_INET, SOCK_STREAM, 0);
-    //     if (sock_rdma_ < 0) {
-    //         ENVOY_LOG(error, "creating sock_rdma error");
-    //         if (!connection_close_) {
-    //             ENVOY_LOG(info, "Closed due to creating sock_rdma error");
-    //             close_procedure();
-    //         }
-    //         return Network::FilterStatus::StopIteration;
-    //     }
-
-    //     struct sockaddr_in addr;
-    //     socklen_t addr_len = sizeof(addr);
-    //     addr.sin_family = AF_INET;
-    //     addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    //     addr.sin_port = 0;  // 0 means that the system will assign a free port number
-    //     if (bind(sock_rdma_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
-    //         ENVOY_LOG(error, "bind error");
-    //         if (!connection_close_) {
-    //             ENVOY_LOG(info, "Closed due to bind error");
-    //             close_procedure();
-    //         }
-    //         return Network::FilterStatus::StopIteration;
-    //     }
-    //     if (getsockname(sock_rdma_, reinterpret_cast<struct sockaddr*>(&addr), &addr_len) < 0) { // Query the socket to find out which port it was bound to
-    //         ENVOY_LOG(error, "getsockname error");
-    //         if (!connection_close_) {
-    //             ENVOY_LOG(info, "Closed due to getsockname error");
-    //             close_procedure();
-    //         }
-    //         return Network::FilterStatus::StopIteration;
-    //     }
-    //     // Send port number of RDMA socket to upstream proxy
-    //     std::string port = std::to_string(ntohs(addr.sin_port));
-    //     Buffer::OwnedImpl port_number(port);
-    //     read_callbacks_->injectReadDataToFilterChain(port_number, end_stream);
-    //     ENVOY_LOG(info, "RDMA port: {}", port);
-
-    //     // Launch RDMA polling thread
-    //     rdma_polling_thread_ = std::thread(&SenderRDMAFilter::rdma_polling, this);
+        setup_rdma();
 
         // Connection init is now done
         connection_init_ = false;
