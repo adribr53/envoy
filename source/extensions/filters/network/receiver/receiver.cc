@@ -21,8 +21,10 @@ namespace Receiver {
 // Event called when receiving new client connection
 Network::FilterStatus ReceiverFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
-    // setup_connection_thread_ = std::thread(&ReceiverFilter::setup_connection, this);
-    setup_connection();
+
+    // Init TCP connection
+    tcp_setup();
+
     return Network::FilterStatus::Continue;
 }
 
@@ -69,13 +71,20 @@ Network::FilterStatus ReceiverFilter::onWrite(Buffer::Instance& data, bool end_s
         return Network::FilterStatus::Continue;
     }
     
-    // Push received data to circular buffer
-    bool pushed = upstream_to_downstream_buffer_->push(data.toString());
-    if (!pushed) {
-        ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
-        if (!connection_close_) {
-            ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
-            close_procedure();
+    // Push received data in circular buffer in string chunks of size payloadBound_   
+    // TO TEST : replace by write
+    while (data.length() > 0) {
+        uint64_t bytes_to_process = std::min(data.length(), payloadBound_);
+        Buffer::OwnedImpl chunk_data;
+        chunk_data.move(data, bytes_to_process);
+
+        bool pushed = upstream_to_downstream_buffer_->push(chunk_data.toString());
+        if (!pushed) {
+            ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+                close_procedure();
+            }
         }
     }
 

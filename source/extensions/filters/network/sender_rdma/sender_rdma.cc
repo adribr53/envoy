@@ -21,7 +21,6 @@ namespace SenderRDMA {
 // Event called when receiving new client connection
 Network::FilterStatus SenderRDMAFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
-    // TODO : launch setup_rdma() here if possible
     return Network::FilterStatus::Continue;
 }
 
@@ -41,28 +40,21 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
 
     // Connection initialization done when receiving the first message from the client
     else if (connection_init_) {
-        ENVOY_LOG(info, "Connection init");
+        ENVOY_LOG(debug, "Connection init");
+
+        // Init RDMA connection
         setup_rdma();
 
         // Connection init is now done
         connection_init_ = false;
     }
 
-    // Push received data in circular buffer
-    // Maybe we should not push the string representation of the buffer (toString()) but directly put the Buffer::InstancePtr for better performance    
-    
+    // Push received data in circular buffer in string chunks of size payloadBound_   
     // TO TEST : replace by write
-
-    ENVOY_LOG(debug, "data length: {}", data.length());
-    const uint64_t chunk_size = 1500; // chunk size in bytes
-    uint64_t bytes_processed = 0;
     while (data.length() > 0) {
-        // Get the next chunk of data
-        uint64_t bytes_to_process = std::min(data.length(), chunk_size);
+        uint64_t bytes_to_process = std::min(data.length(), payloadBound_);
         Buffer::OwnedImpl chunk_data;
-        // data.move(chunk_data, bytes_to_process);
         chunk_data.move(data, bytes_to_process);
-        ENVOY_LOG(debug, "data length: {}", data.length());
 
         bool pushed = downstream_to_upstream_buffer_->push(chunk_data.toString());
         if (!pushed) {
@@ -72,9 +64,6 @@ Network::FilterStatus SenderRDMAFilter::onData(Buffer::Instance& data, bool end_
                 close_procedure();
             }
         }
-
-        bytes_processed += bytes_to_process;
-        ENVOY_LOG(debug, "bytes_processed: {}", bytes_processed);
     }
 
     // Drain read buffer
@@ -98,6 +87,7 @@ Network::FilterStatus SenderRDMAFilter::onWrite(Buffer::Instance& data, bool end
 
     // Drain write buffer
     data.drain(data.length());
+
     // Do not go further in the filter chain
     return Network::FilterStatus::StopIteration;
 } 

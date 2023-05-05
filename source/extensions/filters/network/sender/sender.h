@@ -89,8 +89,8 @@ public:
     // Destructor
     ~SenderFilter() {
         ENVOY_LOG(info, "DESTRUCTOR");
-        close(sock_rdma_);
-        close(sock_distant_rdma_);
+        close(sock_tcp_);
+        close(sock_distant_tcp_);
     }
 
     // Constructor
@@ -98,55 +98,103 @@ public:
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
     }
 
-    // This function will run in a thread and be responsible for RDMA polling
-    void rdma_polling() {
-        ENVOY_LOG(info, "rdma_polling launched");
+    // This function is responsible for initializing the TCP conneciton in both directions
+    void tcp_setup() {
+        ENVOY_LOG(debug, "launch tcp_setup");
 
-        // Wait and accept incoming RDMA connection
-        if (listen(sock_rdma_, 1) < 0) {
+        // Socket TCP initialization
+        sock_tcp_ = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock_tcp_ < 0) {
+            ENVOY_LOG(error, "creating sock_tcp_ error");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to creating sock_tcp_ error");
+                close_procedure();
+            }
+            return;
+        }
+
+        // Get destination IP and destination port of upstream connection
+        uint32_t sourcePort = write_callbacks_->connection().streamInfo().upstreamInfo().get()->upstreamLocalAddress()->ip()->port();
+        std::string destinationIp = write_callbacks_->connection().streamInfo().upstreamInfo().get()->upstreamRemoteAddress()->ip()->addressAsString();
+        uint32_t serverPort = sourcePort+1;        
+        ENVOY_LOG(debug, "Destination IP: {}, Source Port {}", destinationIp, sourcePort);   
+
+        struct sockaddr_in addr;
+        socklen_t addr_len = sizeof(addr);
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        addr.sin_port = htons(serverPort);
+
+        if (bind(sock_tcp_, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
+            ENVOY_LOG(error, "bind error");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to bind error");
+                close_procedure();
+            }
+            return;
+        }
+
+        if (getsockname(sock_tcp_, reinterpret_cast<struct sockaddr*>(&addr), &addr_len) < 0) { // Query the socket to find out which port it was bound to
+            ENVOY_LOG(error, "getsockname error");
+            if (!connection_close_) {
+                ENVOY_LOG(info, "Closed due to getsockname error");
+                close_procedure();
+            }
+            return;
+        }
+
+        // Wait and accept incoming TCP connection
+        if (listen(sock_tcp_, 1) < 0) {
             ENVOY_LOG(error, "listen error");
             if (!connection_close_) {
                 ENVOY_LOG(info, "Closed due to listen error");
                 close_procedure();
             }
-            ENVOY_LOG(info, "rdma_polling stopped");
             return;
         }
 
         struct sockaddr_in client_addr;
         socklen_t client_addr_len = sizeof(client_addr);
-        ENVOY_LOG(info, "Waiting for incoming RDMA connection...");
-        // sock_distant_rdma_ is used to communicate with upstream RDMA
-        sock_distant_rdma_ = accept(sock_rdma_, reinterpret_cast<struct sockaddr*>(&client_addr), &client_addr_len);
-        if (sock_distant_rdma_ < 0) {
+        ENVOY_LOG(debug, "Waiting for incoming TCP connection...");
+
+        // sock_distant_tcp_ is used to communicate with upstream TCP
+        sock_distant_tcp_ = accept(sock_tcp_, reinterpret_cast<struct sockaddr*>(&client_addr), &client_addr_len);
+        if (sock_distant_tcp_ < 0) {
             ENVOY_LOG(error, "accept error");
             if (!connection_close_) {
                 ENVOY_LOG(info, "Closed due to accept error");
                 close_procedure();
             }
-            ENVOY_LOG(info, "rdma_polling stopped");
             return;
         }
-        ENVOY_LOG(info, "RDMA Connection from upstream proxy accepted");
+        ENVOY_LOG(debug, "TCP Connection from upstream proxy accepted");
 
-        // Launch RDMA sender thread
-        rdma_sender_thread_ = std::thread(&SenderFilter::rdma_sender, this);
+        // Launch TCP sender thread
+        tcp_sender_thread_ = std::thread(&SenderFilter::tcp_sender, this);
+
+        // Launch TCP polling thread
+        tcp_polling_thread_ = std::thread(&SenderFilter::tcp_polling, this);
 
         // Launch downstream sender thread
         downstream_sender_thread_ = std::thread(&SenderFilter::downstream_sender, this);
+    }
+
+    // This function will run in a thread and be responsible for TCP polling
+    void tcp_polling() {
+        ENVOY_LOG(info, "tcp_polling launched");
 
         // Start polling
-        const int BUFFER_SIZE = 1024;
+        const int BUFFER_SIZE = payloadBound_;
         char buffer[BUFFER_SIZE];
         int bytes_received;
 
         struct pollfd poll_fds[1];
-        poll_fds[0].fd = sock_distant_rdma_;
+        poll_fds[0].fd = sock_distant_tcp_;
         poll_fds[0].events = POLLIN;
 
         while (true) {
             // Poll data
-            int ret = poll(poll_fds, 1, 3000); // Timeout after 3 seconds if no received data
+            int ret = poll(poll_fds, 1, timeout_value_ * 1000); // Timeout after timeout_value_ seconds if no received data
 
             if (ret < 0) {
                 ENVOY_LOG(error, "poll error");
@@ -158,24 +206,24 @@ public:
             }
 
             // If timeout and flag false: stop thread
-            else if (ret == 0 && !active_rdma_polling_) {
+            else if (ret == 0 && !active_tcp_polling_) {
                 break;
             }
 
             // Receive data on the socket
             else if (poll_fds[0].revents & POLLIN) {
                 memset(buffer, '\0', BUFFER_SIZE);
-                bytes_received = recv(sock_distant_rdma_, buffer, BUFFER_SIZE, 0);
+                bytes_received = recv(sock_distant_tcp_, buffer, BUFFER_SIZE, 0);
                 if (bytes_received < 0) {
-                    ENVOY_LOG(debug, "Error receiving message from RDMA upstream");
+                    ENVOY_LOG(debug, "Error receiving message from TCP upstream");
                     break;
                 } 
                 else if (bytes_received == 0) {
-                    ENVOY_LOG(debug, "RDMA upstream closed the connection");
+                    ENVOY_LOG(debug, "TCP upstream closed the connection");
                     break;
                 }
                 std::string message(buffer, bytes_received); // Put the received data in a string
-                ENVOY_LOG(debug, "Received message from RDMA upstream: {}", message);
+                ENVOY_LOG(debug, "Received message from TCP upstream: {}", message);
 
                 // Push the message for the downstream
                 bool pushed = upstream_to_downstream_buffer_->push(message);
@@ -189,28 +237,28 @@ public:
                 }
             }
         }
-        ENVOY_LOG(info, "rdma_polling stopped");
+        ENVOY_LOG(info, "tcp_polling stopped");
     }
 
-    // This function will run in a thread and be responsible for sending to upstream through RDMA
-    void rdma_sender() {
-        ENVOY_LOG(info, "rdma_sender launched");
+    // This function will run in a thread and be responsible for sending to upstream through TCP
+    void tcp_sender() {
+        ENVOY_LOG(info, "tcp_sender launched");
         while (true) {
             std::string item;
             if (downstream_to_upstream_buffer_->pop(item)) {
                 ENVOY_LOG(debug, "Got item: {}", item);
-                if (send(sock_distant_rdma_, item.c_str(), size(item), 0) < 0) {
-                    ENVOY_LOG(debug, "Error sending RDMA message");
+                if (send(sock_distant_tcp_, item.c_str(), size(item), 0) < 0) {
+                    ENVOY_LOG(debug, "Error sending TCP message");
                     continue;
                 }
             }
-            else { // No item was retrieved after 3 seconds
-                if (!active_rdma_sender_) { // If timeout and flag false: stop thread
+            else { // No item was retrieved after timeout_value_ seconds
+                if (!active_tcp_sender_) { // If timeout and flag false: stop thread
                     break;
                 }
             }
         }
-        ENVOY_LOG(info, "rdma_sender stopped");
+        ENVOY_LOG(info, "tcp_sender stopped");
     }
 
     // This function will run in a thread and be responsible sending responses to the client through the dispatcher
@@ -230,7 +278,7 @@ public:
                     }
                 });
             }
-            else { // No item was retrieved after 3 seconds
+            else { // No item was retrieved after timeout_value_ seconds
                 if (!active_downstream_sender_) { // If timeout and flag false: stop thread
                     break;
                 }
@@ -244,16 +292,16 @@ public:
         connection_close_ = true;
         
         // Flag set to false to stop active threads
-        active_rdma_polling_ = false;
-        active_rdma_sender_ = false;
+        active_tcp_polling_ = false;
+        active_tcp_sender_ = false;
         active_downstream_sender_ = false;
 
         // Wait for all threads to finish
-        if (rdma_polling_thread_.joinable()) {
-            rdma_polling_thread_.join();
+        if (tcp_polling_thread_.joinable()) {
+            tcp_polling_thread_.join();
         }
-        if (rdma_sender_thread_.joinable()) {
-            rdma_sender_thread_.join();
+        if (tcp_sender_thread_.joinable()) {
+            tcp_sender_thread_.join();
         }
         if (downstream_sender_thread_.joinable()) {
             downstream_sender_thread_.join();
@@ -299,12 +347,12 @@ public:
             return true;
         }
 
-        // Get an element from the buffer and return true if successful, false if it did not pop any item after 3 seconds
+        // Get an element from the buffer and return true if successful, false if it did not pop any item after timeout_value_ seconds
         bool pop(T& item) {
             std::unique_lock<std::mutex> lock(mutex_);
             if (size_ == 0) {
-                if (!cv_.wait_for(lock, std::chrono::seconds(3), [this] { return size_ > 0; })) {
-                    return false; // buffer is still empty after 3 seconds
+                if (!cv_.wait_for(lock, std::chrono::seconds(timeout_value_), [this] { return size_ > 0; })) {
+                    return false; // buffer is still empty after timeout_value_ seconds
                 }
             }
             item = buffer_[tail_];
@@ -329,25 +377,39 @@ public:
     };
 
 private:
+    // Callbacks
     Network::ReadFilterCallbacks* read_callbacks_{}; // ReadFilter callback (handle data from downstream)
     Network::WriteFilterCallbacks* write_callbacks_{}; // WriterFilter callback (handle data from upstream)
 
+    // Connection flags
     std::atomic<bool> connection_init_{true}; // Keep track of connection initialization (first message from client)
     std::atomic<bool> connection_close_{false}; // Keep track of connection state
-    int sock_rdma_;
-    int sock_distant_rdma_; // RDMA socket to communicate with upstream RDMA
 
-    std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by onData() and consumed by the RDMA sender thread
-    std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by RDMA polling thread and consumed by downstream sender thread
+    // Sockets
+    int sock_tcp_;
+    int sock_distant_tcp_; // TCP socket to communicate with upstream TCP
 
-    std::atomic<bool> active_rdma_polling_{true}; // If false, stop the thread
-    std::atomic<bool> active_rdma_sender_{true}; // If false, stop the thread
+    // Timeout
+    const static uint32_t timeout_value_ = 1; // In seconds
+
+    // Chunk size
+    const uint64_t payloadBound_ = 1500;
+
+    // Buffers
+    std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by onData() and consumed by the TCP sender thread
+    std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by TCP polling thread and consumed by downstream sender thread
+
+    // Thread flags
+    std::atomic<bool> active_tcp_polling_{true}; // If false, stop the thread
+    std::atomic<bool> active_tcp_sender_{true}; // If false, stop the thread
     std::atomic<bool> active_downstream_sender_{true}; // If false, stop the thread
 
-    std::thread rdma_polling_thread_;
-    std::thread rdma_sender_thread_;
+    // Threads
+    std::thread tcp_polling_thread_;
+    std::thread tcp_sender_thread_;
     std::thread downstream_sender_thread_;
 
+    // Dispatcher
     Envoy::Event::Dispatcher* dispatcher_{}; //  Used to give the control back to the thread responsible for writing responses to the client (used in downstream_sender())
 };
 
