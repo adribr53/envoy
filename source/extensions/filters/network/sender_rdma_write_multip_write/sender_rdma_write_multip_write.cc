@@ -52,7 +52,7 @@ Network::FilterStatus SenderRDMAWriteMultipWriteFilter::onData(Buffer::Instance&
     // Push received data in circular buffer in string chunks of size payloadBound_   
     // TO TEST : replace by write
     while (data.length() > 0) {
-        uint64_t bytes_to_process = std::min(data.length(), payloadBound_);
+        uint64_t bytes_to_process = std::min(data.length(), (const uint64_t) payloadBound_);
         Buffer::OwnedImpl chunk_data;
         chunk_data.move(data, bytes_to_process);
 

@@ -99,19 +99,83 @@ public:
     ~SenderRDMAWriteMultipWriteFilter() {
         ENVOY_LOG(info, "DESTRUCTOR");
         // Free resources
-        delete context_;
-        delete qpFactory_;
-        delete qp_;
-        delete sendBuffer_;
-        for (uint32_t i = 0; i < circleSize_; ++i) {
-			delete receiveBuffers_[i];
-		}
-        delete receiveBuffers_;
+        delete qpFactoryToPoll_;
+        delete contextToPoll_;
+        delete qpToPoll_;
+        delete qpFactoryToWrite_;
+        delete contextToWrite_;
+        delete qpToWrite_;
+        delete hostMemory_;
+        delete remoteMemory_;
     }
 
     // Constructor
     SenderRDMAWriteMultipWriteFilter() {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
+    }
+
+    ///////////////////////////
+    // bunch of utils for RDMA
+    ///////////////////////////
+    int can_write(uint8_t offset, uint8_t limit) {	
+	    return offset!=limit;
+    }
+
+    char get_toCheck(volatile char *cur) {
+        cur = cur + payloadBound_ + sizeof(uint32_t);
+        return *cur;
+    }
+
+    void set_toCheck(volatile char *cur, char v) {
+        cur = cur + payloadBound_ + sizeof(uint32_t);
+        *cur = v;
+    }
+
+    uint32_t get_length(volatile char *cur) {
+        cur = cur + payloadBound_;
+        return ntohl(*((uint32_t *)cur));
+    }
+
+    uint32_t get_length(char *cur) {	
+        cur = cur + payloadBound_;
+        return ntohl(*((uint32_t *)cur));
+    }
+
+    void set_length(volatile char *cur, uint32_t length) {
+        uint32_t *ptr = (uint32_t *) (cur + payloadBound_);
+        *ptr = htonl(length);
+    }
+
+    volatile char *get_payload(volatile char *cur) {
+        uint32_t length = get_length(cur);
+        cur = cur + payloadBound_ - length;
+        return cur;
+    }
+
+    char *get_payload(char *cur) {
+        uint32_t length = get_length(cur);
+        cur = cur + payloadBound_ - length;
+        return cur;
+    }
+
+    volatile char *get_ith(volatile char *head, uint32_t i) {
+        volatile char *ith = head+i*segmentSize_;
+        return ith;
+    }
+
+    char *get_ith(char *head, uint32_t i) {	
+        char *ith = head+i*segmentSize_;
+        return ith;
+    }
+
+    int time_to_write(uint8_t curLimit, uint8_t *remoteLimit) {
+        //printf("%u %u\n", curLimit, *remoteLimit);
+        if (curLimit==*remoteLimit) return 0;
+        if (curLimit<*remoteLimit) {
+                return *remoteLimit-curLimit<circleSize_/4;}
+        else {// remoteLimit 109, curLimit 173
+                return curLimit-*remoteLimit>circleSize_/4;
+        }
     }
 
     // This function is responsible for initializing the RDMA conneciton in both directions
@@ -125,18 +189,45 @@ public:
         uint32_t serverPort = destinationPort+1;        
         ENVOY_LOG(debug, "Destination IP: {}, Destination Port {}", serverIp, serverPort);   
 
-        context_ = new infinity::core::Context();
-        qpFactory_ = new infinity::queues::QueuePairFactory(context_);
+        // SETUP 1
+		contextToWrite_ = new infinity::core::Context();
+		qpFactoryToWrite_ = new infinity::queues::QueuePairFactory(contextToWrite_);
+		qpToWrite_ = qpFactoryToWrite_->connectToRemoteHost(serverIp, serverPort);
+		remoteMemoryToken_ = (infinity::memory::RegionToken *) qpToWrite_->getUserData();
+		remoteMemory_ = new infinity::memory::Buffer(contextToWrite_, bufferSize_);
+		remoteBuffer_ = (char *) remoteMemory_->getData();
+		remoteHead_ = remoteBuffer_ + sizeof(uint8_t);
+		remoteLimit_ = (uint8_t *) remoteBuffer_;		
 
-        // Connect to upstream
-        qp_ = qpFactory_->connectToRemoteHost(serverIp, serverPort);
-
-		sendBuffer_ = new infinity::memory::Buffer(context_, payloadBound_ * sizeof(char));        
-        receiveBuffers_ = new infinity::memory::Buffer *[circleSize_];
-		for (uint32_t i = 0; i < circleSize_; ++i) {
-			receiveBuffers_[i] = new infinity::memory::Buffer(context_, payloadBound_ * sizeof(char));
-			context_->postReceiveBuffer(receiveBuffers_[i]);
+		// SETUP 2
+		contextToPoll_ = new infinity::core::Context();
+		qpFactoryToPoll_ = new infinity::queues::QueuePairFactory(contextToPoll_);
+		hostMemory_ = new infinity::memory::Buffer(contextToPoll_, bufferSize_); // todo : one more case for reader head
+		hostMemoryToken_ = hostMemory_->createRegionToken();
+		volatile char *hostBuffer = (char *) hostMemory_->getData();
+		hostLimit_ = (uint8_t *) hostBuffer;
+		*hostLimit_ = circleSize_-1;
+		hostHead_ = hostBuffer+sizeof(uint8_t); 		 		
+		for (uint8_t i = 1; i<=circleSize_; i++) {
+			volatile char *ith = get_ith(hostHead_, i);
+			set_toCheck(ith, '0');
 		}
+		qpFactoryToPoll_->bindToPort(serverPort);
+		qpToPoll_ = qpFactoryToPoll_->acceptIncomingConnection(hostMemoryToken_, sizeof(infinity::memory::RegionToken)); 		
+
+
+        // context_ = new infinity::core::Context();
+        // qpFactory_ = new infinity::queues::QueuePairFactory(context_);
+
+        // // Connect to upstream
+        // qp_ = qpFactory_->connectToRemoteHost(serverIp, serverPort);
+
+		// sendBuffer_ = new infinity::memory::Buffer(context_, payloadBound_ * sizeof(char));        
+        // receiveBuffers_ = new infinity::memory::Buffer *[circleSize_];
+		// for (uint32_t i = 0; i < circleSize_; ++i) {
+		// 	receiveBuffers_[i] = new infinity::memory::Buffer(context_, payloadBound_ * sizeof(char));
+		// 	context_->postReceiveBuffer(receiveBuffers_[i]);
+		// }
         
         rdma_sender_thread_ = std::thread(&SenderRDMAWriteMultipWriteFilter::rdma_sender, this);
         rdma_polling_thread_ = std::thread(&SenderRDMAWriteMultipWriteFilter::rdma_polling, this);
@@ -146,54 +237,135 @@ public:
     // This function will run in a thread and be responsible for RDMA polling
     void rdma_polling() {
         ENVOY_LOG(info, "rdma_polling started");
-        while (true) {
-            int cnt = 0;
-            // RECV from upstream
-            while (!context_->receive(&receiveElement_)) {
-                if (++cnt > 1000000) { // Serves as a timeout
-                    if (!active_rdma_polling_) {
+
+        uint8_t curOffset = 0;		
+        uint8_t curLimit = 199;
+        *remoteLimit_ = curLimit;	
+
+        clock_t lastTime = clock();
+        infinity::requests::RequestToken requestTokenWriteControl(contextToWrite_);
+        while (1) {			
+            volatile char *ith = get_ith(hostHead_, curOffset);
+            if (3000000<clock()-lastTime) {	
+                if (!active_rdma_polling_) {
+                        // do a write here to allow finish on envoy ?
                         ENVOY_LOG(info, "rdma_polling stopped");
                         return;
-                    }                                                                    
-                }
-            }        
-
-            std::string message((char *) receiveElement_.buffer->getData(), receiveElement_.bytesWritten); // Put the received data in a string                
-            // Push the data in the circular buffer
-            bool pushed = upstream_to_downstream_buffer_->push(message);
-            if (!pushed) {
-                ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
-                if (!connection_close_) {
-                    ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
-                    close_procedure();
-                }
+                    }     						
                 break;
             }
-            context_->postReceiveBuffer(receiveElement_.buffer);
-        }
+            
+            if (get_toCheck(ith)=='1') {
+                //printf("data arrived %u %u\n", curLimit, *remoteLimit);
+                set_toCheck(ith, '0');		
+                std::string message((char*) get_payload(ith), get_length(ith)); // Put the received data in a string                
+                // Push the data in the circular buffer
+                bool pushed = upstream_to_downstream_buffer_->push(message);
+                if (!pushed) {
+                    ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+                    if (!connection_close_) {
+                        ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+                        close_procedure();
+                    }
+                    break;
+                }
+                curOffset = (curOffset+1) % circleSize_;
+                curLimit = (curLimit+1) % circleSize_;
+                if (time_to_write(curLimit, remoteLimit_)) {
+                    //printf("time to write %u %u\n", curLimit, *remoteLimit);
+                    //qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint8_t), &requestTokenRead);
+                    *remoteLimit_ = curLimit;
+                    qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
+                    requestTokenWriteControl.waitUntilCompleted();
+                }
+                lastTime = clock();
+            }		
+        };
+        // while (true) {
+        //     int cnt = 0;
+        //     // RECV from upstream
+        //     while (!context_->receive(&receiveElement_)) {
+        //         if (++cnt > 1000000) { // Serves as a timeout
+        //             if (!active_rdma_polling_) {
+        //                 ENVOY_LOG(info, "rdma_polling stopped");
+        //                 return;
+        //             }                                                                    
+        //         }
+        //     }        
+
+        //     std::string message((char *) receiveElement_.buffer->getData(), receiveElement_.bytesWritten); // Put the received data in a string                
+        //     // Push the data in the circular buffer
+        //     bool pushed = upstream_to_downstream_buffer_->push(message);
+        //     if (!pushed) {
+        //         ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+        //         if (!connection_close_) {
+        //             ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+        //             close_procedure();
+        //         }
+        //         break;
+        //     }
+        //     context_->postReceiveBuffer(receiveElement_.buffer);
+        // }
         ENVOY_LOG(info, "rdma_polling stopped");
     }
     
     // This function will run in a thread and be responsible for sending to upstream through RDMA
     void rdma_sender() {
         ENVOY_LOG(info, "rdma_sender launched");
-        while (true) {    
-            std::string item;
-            if (downstream_to_upstream_buffer_->pop(item)) { // to opti   
-                ENVOY_LOG(debug, "Got item: {}", item);        
-
-                // SEND to upstream
-                infinity::requests::RequestToken requestToken(context_);
-                memcpy(sendBuffer_->getData(), item.c_str(), item.size());
-                qp_->send(sendBuffer_, item.size(), &requestToken);
-                requestToken.waitUntilCompleted();    
+        char *curSegment;
+    	uint8_t offset = 0;
+	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
+        while (1) {		
+            if (!can_write(offset, *hostLimit_)) {
+                continue; // maybe need to force write on the receiver when co is done to allow for termination of this
             }
-            else { // No item was retrieved after timeout_value seconds
+            curSegment = get_ith(remoteHead_, offset);	
+            std::string item;	
+            if (downstream_to_upstream_buffer_->pop(item)) { // to opti   
+                // TO USE IF put directly in buffer
+                // if (length!=payloadBound) {
+                //     // that, or checksum, of offload sending unused bytes to the nic
+                //     int diff = payloadBound-length;
+                //     for (int i=length-1; i>=0; i--) {
+                //         curSegment[i+diff] = curSegment[i];
+                //     }
+                // }
+                ssize_t length = item.size();
+                memcpy(curSegment+payloadBound_-item.size(), item.c_str(), length);
+                set_toCheck(curSegment, '1');		
+                set_length(curSegment, length);		
+                uint32_t writeOffset = sizeof(uint8_t) + (segmentSize_ * offset) + (payloadBound_-length);		
+                uint32_t writeLength = sizeof(uint32_t)+sizeof(char)+length;		
+                if (!offset) {
+                    qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), &requestTokenWrite);		
+                    requestTokenWrite.waitUntilCompleted();
+                } else {
+                    qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), NULL);
+                }
+                offset = (offset + 1) % circleSize_;
+            } 	else { // No item was retrieved after timeout_value seconds
                 if (!active_rdma_sender_) { // If timeout and flag false: stop thread
                     break;
                 }
-            }
+            }            		
         }
+        // while (true) {    
+        //     std::string item;
+        //     if (downstream_to_upstream_buffer_->pop(item)) { // to opti   
+        //         ENVOY_LOG(debug, "Got item: {}", item);        
+
+        //         // SEND to upstream
+        //         infinity::requests::RequestToken requestToken(context_);
+        //         memcpy(sendBuffer_->getData(), item.c_str(), item.size());
+        //         qp_->send(sendBuffer_, item.size(), &requestToken);
+        //         requestToken.waitUntilCompleted();    
+        //     }
+        //     else { // No item was retrieved after timeout_value seconds
+        //         if (!active_rdma_sender_) { // If timeout and flag false: stop thread
+        //             break;
+        //         }
+        //     }
+        // }
         ENVOY_LOG(info, "rdma_sender stopped");
     }
 
@@ -327,14 +499,37 @@ private:
     const static uint32_t timeout_value_ = 1; // In seconds
 
     // RDMA stuff
-    const uint64_t payloadBound_ = 1500;
+    // const uint64_t payloadBound_ = 1500;
+    // const uint32_t circleSize_ = 100;
+    // infinity::core::Context *context_;
+    // infinity::queues::QueuePairFactory *qpFactory_;
+    // infinity::queues::QueuePair *qp_;
+    // infinity::memory::Buffer **receiveBuffers_;
+    // infinity::core::receive_element_t receiveElement_;
+    // infinity::memory::Buffer *sendBuffer_;
+
     const uint32_t circleSize_ = 100;
-    infinity::core::Context *context_;
-    infinity::queues::QueuePairFactory *qpFactory_;
-    infinity::queues::QueuePair *qp_;
-    infinity::memory::Buffer **receiveBuffers_;
-    infinity::core::receive_element_t receiveElement_;
-    infinity::memory::Buffer *sendBuffer_;
+    const uint32_t payloadBound_ = 1500;
+
+    uint32_t segmentSize_ = sizeof(uint32_t)+sizeof(char)+payloadBound_;
+    uint32_t bufferSize_ = (circleSize_ * segmentSize_ )+sizeof(uint8_t);
+
+    infinity::core::Context *contextToWrite_;
+    infinity::queues::QueuePairFactory *qpFactoryToWrite_;
+    infinity::queues::QueuePair *qpToWrite_;
+    infinity::memory::RegionToken *remoteMemoryToken_;
+    infinity::memory::Buffer *remoteMemory_;
+    char *remoteBuffer_;
+    char *remoteHead_;
+    uint8_t *remoteLimit_;
+
+    infinity::core::Context *contextToPoll_;
+    infinity::queues::QueuePairFactory *qpFactoryToPoll_;
+    infinity::queues::QueuePair *qpToPoll_;
+    infinity::memory::Buffer *hostMemory_; // todo : one more case for reader head
+    infinity::memory::RegionToken *hostMemoryToken_;
+    volatile char *hostHead_; 
+    volatile uint8_t* hostLimit_;
 
     // Buffers
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by onData() and consumed by the RDMA sender thread
