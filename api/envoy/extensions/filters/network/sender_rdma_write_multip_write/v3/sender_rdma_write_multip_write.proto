@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package envoy.extensions.filters.network.sender_rdma_write_multip_write.v3;
+
+import "udpa/annotations/status.proto";
+import "udpa/annotations/versioning.proto";
+
+option java_package = "io.envoyproxy.envoy.extensions.filters.network.sender_rdma_write_multip_write.v3";
+option java_outer_classname = "SenderRDMAWriteMultipWriteProto";
+option java_multiple_files = true;
+option go_package = "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/sender_rdma_write_multip_write/v3;sender_rdma_write_multip_writev3";
+option (udpa.annotations.file_status).package_version_status = ACTIVE;
+
+// [#protodoc-title: SenderRDMAWriteMultipWrite]
+// SenderRDMAWriteMultipWrite :ref:`configuration overview <config_network_filters_sender_rdma_write_multip_write>`.
+// [#extension: envoy.filters.network.sender_rdma_write_multip_write]
+
+message SenderRDMAWriteMultipWrite {
+  option (udpa.annotations.versioning).previous_message_type =
+      "envoy.config.filter.network.sender_rdma_write_multip_write.v2.SenderRDMAWriteMultipWrite";
+  string destination_cluster = 1;
+}

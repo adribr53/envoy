@@ -24,8 +24,12 @@ public:
   const std::string Sender = "envoy.filters.network.sender";
   // ReceiverRDMA filter
   const std::string ReceiverRDMA = "envoy.filters.network.receiver_rdma";
+  //ReceiverRDMAWriteMultipWrite
+  const std::string ReceiverRDMAWriteMultipWrite = "envoy.filters.network.receiver_rdma_write_multip_write";
   // SenderRDMA filter
   const std::string SenderRDMA = "envoy.filters.network.sender_rdma";
+  //SenderRDMAWriteMultipWrite
+  const std::string SenderRDMAWriteMultipWrite = "envoy.filters.network.sender_rdma_write_multip_write";
   // Direct response filter
   const std::string DirectResponse = "envoy.filters.network.direct_response";
   // RocketMQ proxy filter
