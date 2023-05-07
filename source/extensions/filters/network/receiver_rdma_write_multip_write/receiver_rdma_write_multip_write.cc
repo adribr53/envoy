@@ -23,7 +23,7 @@ Network::FilterStatus ReceiverRDMAWriteMultipWriteFilter::onNewConnection() {
     ENVOY_LOG(debug, "onNewConnection triggered");
 
     // Init RDMA connection
-    setup_rdma();
+    // setup_rdma();
 
     return Network::FilterStatus::Continue;
 }
@@ -74,7 +74,7 @@ Network::FilterStatus ReceiverRDMAWriteMultipWriteFilter::onWrite(Buffer::Instan
     // Push received data in circular buffer in string chunks of size payloadBound_  
     // to test - make the write here
     while (data.length() > 0) {
-        uint64_t bytes_to_process = std::min(data.length(), payloadBound_);
+        uint64_t bytes_to_process = std::min(data.length(), (const uint64_t) payloadBound_);
         Buffer::OwnedImpl chunk_data;
         chunk_data.move(data, bytes_to_process);
 
