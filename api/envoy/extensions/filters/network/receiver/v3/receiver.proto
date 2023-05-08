@@ -18,5 +18,8 @@ option (udpa.annotations.file_status).package_version_status = ACTIVE;
 message Receiver {
   option (udpa.annotations.versioning).previous_message_type =
       "envoy.config.filter.network.receiver.v2.Receiver";
-  string destination_cluster = 1;
+  uint32 payload_bound = 1;
+  uint32 circle_size = 2;
+  uint32 time_to_write = 3;
+  uint32 shared_buffer_size = 4;
 }
