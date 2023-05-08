@@ -28,12 +28,16 @@ public:
   const std::string ReceiverRDMAWriteMultipWrite = "envoy.filters.network.receiver_rdma_write_multip_write";
   //ReceiverRDMAWriteMultipRead
   const std::string ReceiverRDMAWriteMultipRead = "envoy.filters.network.receiver_rdma_write_multip_read";
+  //ReceiverRDMAWriteNomultipRead
+  const std::string ReceiverRDMAWriteNomultipRead = "envoy.filters.network.receiver_rdma_write_nomultip_read";
   // SenderRDMA filter
   const std::string SenderRDMA = "envoy.filters.network.sender_rdma";
   //SenderRDMAWriteMultipWrite
   const std::string SenderRDMAWriteMultipWrite = "envoy.filters.network.sender_rdma_write_multip_write";
   //SenderRDMAWriteMultipRead
   const std::string SenderRDMAWriteMultipRead = "envoy.filters.network.sender_rdma_write_multip_read";
+  //SenderRDMAWriteNomultipRead
+  const std::string SenderRDMAWriteNomultipRead = "envoy.filters.network.sender_rdma_write_nomultip_read";
   // Direct response filter
   const std::string DirectResponse = "envoy.filters.network.direct_response";
   // RocketMQ proxy filter
