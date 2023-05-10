@@ -16,7 +16,7 @@ static_resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 172.18.132.9
+                    address: ${CLIENT_IP}
                     port_value: 2000
 
   - name: cluster_memcached
@@ -60,7 +60,7 @@ static_resources:
     - name: ingress_listener_local # take requests from other services in a service mesh and forward them to the local application related to the Envoy sidecar instance
       address:
         socket_address:
-          address: 172.18.132.43
+          address: ${SERVER_IP}
           port_value: 2000
       filter_chains:
         filters:
@@ -73,7 +73,7 @@ static_resources:
     - name: ingress_listener_memcached # take requests from other services in a service mesh and forward them to the local application related to the Envoy sidecar instance
       address:
         socket_address:
-          address: 172.18.132.43
+          address: ${SERVER_IP}
           port_value: 2001
       filter_chains:
         filters:

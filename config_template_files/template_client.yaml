@@ -16,7 +16,7 @@ static_resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 172.18.132.43
+                    address: ${SERVER_IP}
                     port_value: 2000
 
   - name: cluster_node2_memcached
@@ -28,20 +28,8 @@ static_resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 172.18.132.43
+                    address: ${SERVER_IP}
                     port_value: 2001
-
-  - name: cluster_node2_nginx
-    connect_timeout: 60s
-    load_assignment:
-      cluster_name: cluster_node2_nginx
-      endpoints:
-        - lb_endpoints:
-            - endpoint:
-                address:
-                  socket_address:
-                    address: 172.18.132.43
-                    port_value: 2002
 
   - name: cluster_local_service
     connect_timeout: 60s
@@ -65,7 +53,7 @@ static_resources:
         filters:
           - name: sender
             typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.network.sender_rdma_write_multip_read.v3.SenderRDMAWriteMultipRead
+              "@type": type.googleapis.com/envoy.extensions.filters.network.${sender_type}.v3.${SENDER_TYPE}
               payload_bound: 1500
               circle_size: 200
               time_to_write: 50
@@ -85,7 +73,7 @@ static_resources:
         filters:
           - name: sender
             typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.network.sender_rdma_write_multip_read.v3.SenderRDMAWriteMultipRead
+              "@type": type.googleapis.com/envoy.extensions.filters.network.${sender_type}.v3.${SENDER_TYPE}
               payload_bound: 1500
               circle_size: 200
               time_to_write: 50
@@ -96,36 +84,16 @@ static_resources:
               stat_prefix: destination
               cluster: cluster_node2_memcached
     
-    - name: egress_listener_dst_node2_nginx # take requests from the local application related to the Envoy sidecar instance and forwards them to other services in the network
-      address:
-        socket_address:
-          address: 127.0.0.1
-          port_value: 3002
-      filter_chains:
-        filters:
-          - name: sender
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.network.sender_rdma_write_multip_read.v3.SenderRDMAWriteMultipRead
-              payload_bound: 1500
-              circle_size: 200
-              time_to_write: 50
-              shared_buffer_size: 8388608
-          - name: envoy.filters.network.tcp_proxy
-            typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
-              stat_prefix: destination
-              cluster: cluster_node2_nginx
-    
     - name: ingress_listener # take requests from other services in a service mesh and forward them to the local application related to the Envoy sidecar instance
       address:
         socket_address:
-          address: 172.18.132.37
+          address: ${CLIENT_IP}
           port_value: 2000
       filter_chains:
         filters:
           - name: receiver
             typed_config:
-              "@type": type.googleapis.com/envoy.extensions.filters.network.receiver_rdma_write_multip_read.v3.ReceiverRDMAWriteMultipRead
+              "@type": type.googleapis.com/envoy.extensions.filters.network.${receiver_type}.v3.${RECEIVER_TYPE}
               payload_bound: 1500
               circle_size: 200
               time_to_write: 50

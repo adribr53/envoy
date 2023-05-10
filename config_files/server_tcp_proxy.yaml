@@ -16,7 +16,7 @@ static_resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 172.18.132.9
+                    address: 172.18.132.26
                     port_value: 2000
 
   - name: cluster_memcached

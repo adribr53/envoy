@@ -23,10 +23,15 @@ public:
 
 private:
   Network::FilterFactoryCb
-  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::sender::v3::Sender&,
+  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::sender::v3::Sender& proto_config,
                                     Server::Configuration::FactoryContext&) override {
-    return [](Network::FilterManager& filter_manager) -> void {
-      auto sender_filter = std::make_shared<SenderFilter>();
+    const uint32_t payloadBound = proto_config.payload_bound();
+    const uint32_t circleSize = proto_config.circle_size();
+    const uint32_t timeToWrite = proto_config.time_to_write();
+    const uint32_t sharedBufferSize = proto_config.shared_buffer_size();
+
+    return [payloadBound, circleSize, timeToWrite, sharedBufferSize](Network::FilterManager& filter_manager) -> void {
+      auto sender_filter = std::make_shared<SenderFilter>(payloadBound, circleSize, timeToWrite, sharedBufferSize);
       filter_manager.addReadFilter(sender_filter);
       filter_manager.addWriteFilter(sender_filter);
     };

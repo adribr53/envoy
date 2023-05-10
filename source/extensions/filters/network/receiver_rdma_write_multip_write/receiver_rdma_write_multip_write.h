@@ -117,8 +117,19 @@ public:
     }
 
     // Constructor
-    ReceiverRDMAWriteMultipWriteFilter() {
+    ReceiverRDMAWriteMultipWriteFilter(const uint32_t payloadBound, const uint32_t circleSize, const uint32_t timeToWrite, const uint32_t sharedBufferSize)
+        : payloadBound_(payloadBound), circleSize_(circleSize), timeToWrite_(timeToWrite), sharedBufferSize_(sharedBufferSize)
+    {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
+        ENVOY_LOG(info, "payloadBound_: {}", payloadBound_);
+        ENVOY_LOG(info, "circleSize_: {}", circleSize_);
+        ENVOY_LOG(info, "timeToWrite_: {}", timeToWrite_);
+        ENVOY_LOG(info, "sharedBufferSize_: {}", sharedBufferSize_);
+
+        downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
+        upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
+        segmentSize_ = sizeof(uint32_t) + sizeof(char) + payloadBound_;
+        bufferSize_ = (circleSize_ * segmentSize_ ) + sizeof(uint8_t);
     }
 
     ///////////////////////////
@@ -475,11 +486,13 @@ private:
     const static uint32_t timeout_value_ = 1; // In seconds
       
     // RDMA stuff   
-    const uint32_t payloadBound_ = 1500;
-    const uint32_t circleSize_ = 200;
+    const uint32_t payloadBound_;
+    const uint32_t circleSize_;
+    const uint32_t timeToWrite_;
+    const uint32_t sharedBufferSize_;
 
-    uint32_t segmentSize_ = sizeof(uint32_t) + sizeof(char) + payloadBound_;
-    uint32_t bufferSize_ = (circleSize_ * segmentSize_ ) + sizeof(uint8_t);
+    uint32_t segmentSize_;
+    uint32_t bufferSize_;
 
     infinity::core::Context *contextToWrite_;
     infinity::queues::QueuePairFactory *qpFactoryToWrite_;
@@ -499,8 +512,8 @@ private:
     volatile uint8_t* hostLimit_;
 
     // Buffers
-    std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by RDMA polling thread and consumed by the upstream sender thread
-    std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(8388608); // Buffer supplied by onWrite() and consumed by RDMA sender thread
+    std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_; // Buffer supplied by RDMA polling thread and consumed by the upstream sender thread
+    std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_; // Buffer supplied by onWrite() and consumed by RDMA sender thread
 
     // Dispatcher
     Envoy::Event::Dispatcher* dispatcher_{}; // Used to give the control back to the thread responsible for sending requests to the server (used in upstream_sender())

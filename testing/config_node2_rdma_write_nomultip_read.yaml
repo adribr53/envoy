@@ -16,7 +16,7 @@ static_resources:
             - endpoint:
                 address:
                   socket_address:
-                    address: 172.18.132.6
+                    address: 172.18.132.37
                     port_value: 2000
 
   - name: cluster_memcached
@@ -66,6 +66,10 @@ static_resources:
           - name: sender
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.sender_rdma_write_nomultip_read.v3.SenderRDMAWriteNomultipRead
+              payload_bound: 1500
+              circle_size: 200
+              time_to_write: 50
+              shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
@@ -75,13 +79,17 @@ static_resources:
     - name: ingress_listener_local # take requests from other services in a service mesh and forward them to the local application related to the Envoy sidecar instance
       address:
         socket_address:
-          address: 172.18.132.37
+          address: 172.18.132.43
           port_value: 2000
       filter_chains:
         filters:
           - name: receiver
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.receiver_rdma_write_nomultip_read.v3.ReceiverRDMAWriteNomultipRead
+              payload_bound: 1500
+              circle_size: 200
+              time_to_write: 50
+              shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
@@ -91,13 +99,17 @@ static_resources:
     - name: ingress_listener_memcached # take requests from other services in a service mesh and forward them to the local application related to the Envoy sidecar instance
       address:
         socket_address:
-          address: 172.18.132.37
+          address: 172.18.132.43
           port_value: 2001
       filter_chains:
         filters:
           - name: receiver
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.receiver_rdma_write_nomultip_read.v3.ReceiverRDMAWriteNomultipRead
+              payload_bound: 1500
+              circle_size: 200
+              time_to_write: 50
+              shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
@@ -107,13 +119,17 @@ static_resources:
     - name: ingress_listener_nginx # take requests from other services in a service mesh and forward them to the local application related to the Envoy sidecar instance
       address:
         socket_address:
-          address: 172.18.132.37
+          address: 172.18.132.43
           port_value: 2002
       filter_chains:
         filters:
           - name: receiver
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.receiver_rdma_write_nomultip_read.v3.ReceiverRDMAWriteNomultipRead
+              payload_bound: 1500
+              circle_size: 200
+              time_to_write: 50
+              shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy

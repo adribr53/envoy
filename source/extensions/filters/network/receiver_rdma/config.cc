@@ -24,10 +24,15 @@ public:
 
 private:
   Network::FilterFactoryCb
-  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::receiver_rdma::v3::ReceiverRDMA&,
+  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::receiver_rdma::v3::ReceiverRDMA& proto_config,
                                     Server::Configuration::FactoryContext&) override {
-    return [](Network::FilterManager& filter_manager) -> void {
-      auto receiver_rdma_filter = std::make_shared<ReceiverRDMAFilter>();
+    const uint32_t payloadBound = proto_config.payload_bound();
+    const uint32_t circleSize = proto_config.circle_size();
+    const uint32_t timeToWrite = proto_config.time_to_write();
+    const uint32_t sharedBufferSize = proto_config.shared_buffer_size();
+
+    return [payloadBound, circleSize, timeToWrite, sharedBufferSize](Network::FilterManager& filter_manager) -> void {
+      auto receiver_rdma_filter = std::make_shared<ReceiverRDMAFilter>(payloadBound, circleSize, timeToWrite, sharedBufferSize);
       filter_manager.addReadFilter(receiver_rdma_filter);
       filter_manager.addWriteFilter(receiver_rdma_filter);
     };  

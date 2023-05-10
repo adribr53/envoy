@@ -23,10 +23,15 @@ public:
 
 private:
   Network::FilterFactoryCb
-  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::sender_rdma_write_multip_read::v3::SenderRDMAWriteMultipRead&,
+  createFilterFactoryFromProtoTyped(const envoy::extensions::filters::network::sender_rdma_write_multip_read::v3::SenderRDMAWriteMultipRead& proto_config,
                                     Server::Configuration::FactoryContext&) override {
-    return [](Network::FilterManager& filter_manager) -> void {
-      auto sender_rdma_write_multip_read_filter = std::make_shared<SenderRDMAWriteMultipReadFilter>();
+    const uint32_t payloadBound = proto_config.payload_bound();
+    const uint32_t circleSize = proto_config.circle_size();
+    const uint32_t timeToWrite = proto_config.time_to_write();
+    const uint32_t sharedBufferSize = proto_config.shared_buffer_size();
+
+    return [payloadBound, circleSize, timeToWrite, sharedBufferSize](Network::FilterManager& filter_manager) -> void {
+      auto sender_rdma_write_multip_read_filter = std::make_shared<SenderRDMAWriteMultipReadFilter>(payloadBound, circleSize, timeToWrite, sharedBufferSize);
       filter_manager.addReadFilter(sender_rdma_write_multip_read_filter);
       filter_manager.addWriteFilter(sender_rdma_write_multip_read_filter);
     };
