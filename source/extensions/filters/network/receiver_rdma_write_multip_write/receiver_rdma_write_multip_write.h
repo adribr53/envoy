@@ -179,9 +179,9 @@ public:
         //printf("%u %u\n", curLimit, *remoteLimit_);
         if (curLimit == *remoteLimit_) return 0;
         if (curLimit < *remoteLimit_) {
-                return *remoteLimit_-curLimit < circleSize_/4;}
+                return *remoteLimit_-curLimit < 10;}
         else {// remoteLimit_ 109, curLimit 173
-                return curLimit-*remoteLimit_ > circleSize_/4;
+                return curLimit-*remoteLimit_ > 10;
         }
     }
     
@@ -242,6 +242,8 @@ public:
 
             clock_t lastTime = clock();
             infinity::requests::RequestToken requestTokenWriteControl(contextToWrite_);
+            uint8_t unsignaled = 0;
+            
             while (true) {
                 volatile char *ith = get_ith(hostHead_, curOffset);
 
@@ -253,7 +255,6 @@ public:
                     } 						
                     // break;
                 }
-                
                 if (get_toCheck(ith) == '1') {
                     //printf("data arrived %u %u\n", curLimit, *remoteLimit_);
                     set_toCheck(ith, '0');		
@@ -275,8 +276,13 @@ public:
                         //printf("time to write %u %u\n", curLimit, *remoteLimit_);
                         //qpToWrite_->read(remoteMemory_, remoteMemoryToken_, sizeof(uint8_t), &requestTokenRead);
                         *remoteLimit_ = curLimit;
-                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
-                        requestTokenWriteControl.waitUntilCompleted();
+                        if (!unsignaled) {
+                            qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
+                            requestTokenWriteControl.waitUntilCompleted();
+                        } else {
+                            qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), NULL);
+                        }
+                        unsignaled = (unsignaled + 1) % 128;
                     }
                     lastTime = clock();
                 }		

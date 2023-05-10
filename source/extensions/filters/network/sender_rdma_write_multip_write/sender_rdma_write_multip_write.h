@@ -172,9 +172,9 @@ public:
         //printf("%u %u\n", curLimit, *remoteLimit);
         if (curLimit == *remoteLimit) return 0;
         if (curLimit < *remoteLimit) {
-                return *remoteLimit-curLimit < circleSize_/4;}
+                return *remoteLimit-curLimit < 10;}
         else {// remoteLimit 109, curLimit 173
-                return curLimit-*remoteLimit > circleSize_/4;
+                return curLimit-*remoteLimit > 10;
         }
     }
 
@@ -233,6 +233,7 @@ public:
 
         clock_t lastTime = clock();
         infinity::requests::RequestToken requestTokenWriteControl(contextToWrite_);
+        uint8_t unsignaled = 0;        
         while (true) {
             volatile char *ith = get_ith(hostHead_, curOffset);
             if (3000000 < clock() - lastTime) {	
@@ -243,7 +244,6 @@ public:
                     }     						
                 // break;
             }
-            
             if (get_toCheck(ith) == '1') {
                 //printf("data arrived %u %u\n", curLimit, *remoteLimit);
                 set_toCheck(ith, '0');		
@@ -264,8 +264,13 @@ public:
                     //printf("time to write %u %u\n", curLimit, *remoteLimit);
                     //qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint8_t), &requestTokenRead);
                     *remoteLimit_ = curLimit;
-                    qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
-                    requestTokenWriteControl.waitUntilCompleted();
+                    if (!unsignaled) {
+                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
+                        requestTokenWriteControl.waitUntilCompleted();
+                    } else {
+                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), NULL);
+                    }
+                    unsignaled = (unsignaled + 1) % 128;
                 }
                 lastTime = clock();
             }		
