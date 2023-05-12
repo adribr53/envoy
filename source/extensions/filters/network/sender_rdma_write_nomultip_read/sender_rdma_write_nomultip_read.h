@@ -111,7 +111,7 @@ public:
 
     // Constructor
     SenderRDMAWriteNomultipReadFilter(const uint32_t payloadBound, const uint32_t circleSize, const uint32_t timeToWrite, const uint32_t sharedBufferSize)
-        : payloadBound_(payloadBound), circleSize_(circleSize), timeToWrite_(timeToWrite), sharedBufferSize_(sharedBufferSize)
+        : circleSize_(circleSize), payloadBound_(payloadBound), timeToWrite_(timeToWrite), sharedBufferSize_(sharedBufferSize)
     {
         ENVOY_LOG(info, "CONSTRUCTOR CALLED");
         ENVOY_LOG(info, "payloadBound_: {}", payloadBound_);
@@ -231,7 +231,7 @@ public:
         
         rdma_sender_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::rdma_sender, this);
         rdma_polling_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::rdma_polling, this);
-        downstream_sender_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::downstream_sender, this);
+        //downstream_sender_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::downstream_sender, this);
     }
 
     // This function will run in a thread and be responsible for RDMA polling
@@ -244,6 +244,7 @@ public:
 
         clock_t lastTime = clock();
         infinity::requests::RequestToken requestTokenWriteControl(contextToWrite_);
+        uint8_t unsignaled = 0;
         while (true) {
             volatile char *ith = get_ith(hostHead_, curOffset);
             if (3000000 < clock() - lastTime) {	
@@ -260,7 +261,7 @@ public:
                 set_toCheck(ith, '0');		
                 std::string message((char*) get_payload(ith), get_length(ith)); // Put the received data in a string                
                 // Push the data in the circular buffer
-                bool pushed = upstream_to_downstream_buffer_->push(message);
+                /*bool pushed = upstream_to_downstream_buffer_->push(message);
                 if (!pushed) {
                     ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
                     if (!connection_close_) {
@@ -268,15 +269,26 @@ public:
                         close_procedure();
                     }
                     break;
-                }
+                }*/
+                auto weak_self = weak_from_this();
+                dispatcher_->post([weak_self, buffer = std::make_shared<Buffer::OwnedImpl>(message)]() -> void {
+                    if (auto self = weak_self.lock()) {
+                        self->write_callbacks_->injectWriteDataToFilterChain(*buffer, false); // Inject data to the listener
+                    }
+                });
                 curOffset = (curOffset+1) % circleSize_;
                 curLimit = (curLimit+1) % circleSize_;
                 if (time_to_write(curLimit, remoteLimit_)) {
                     //printf("time to write %u %u\n", curLimit, *remoteLimit);
                     //qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint8_t), &requestTokenRead);
                     *remoteLimit_ = curLimit;
-                    qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
-                    requestTokenWriteControl.waitUntilCompleted();
+                    if (!unsignaled) {
+                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
+                        requestTokenWriteControl.waitUntilCompleted();
+                    } else {
+                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), NULL);
+                    }
+                    unsignaled = (unsignaled + 1 % 128);
                 }
                 lastTime = clock();
             }		
@@ -291,8 +303,11 @@ public:
     	uint8_t offset = 0;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
 
+        uint64_t cnt = 0;
         while (true) {
+            int toswitch = 1;
             if (!can_write(offset, *hostLimit_)) {
+                if (toswitch) {cnt++; toswitch=0;}   
                 if (!active_rdma_sender_ && downstream_to_upstream_buffer_->getSize() == 0) {
                     break;
                 }
@@ -304,7 +319,7 @@ public:
 
             std::string item;	
             if (downstream_to_upstream_buffer_->pop(item)) { // to opti
-                ENVOY_LOG(debug, "Got item: {}", item);
+                //ENVOY_LOG(debug, "Got item: {}", item);
 
                 // TO USE IF put directly in buffer
                 // if (length!=payloadBound) {
@@ -334,7 +349,7 @@ public:
                 }
             }            		
         }
-        ENVOY_LOG(info, "rdma_sender stopped");
+        ENVOY_LOG(info, "rdma_sender stopped cnt: {}", cnt);
     }
 
     // This function will run in a thread and be responsible sending responses to the client through the dispatcher
@@ -381,9 +396,9 @@ public:
         if (rdma_sender_thread_.joinable()) {
             rdma_sender_thread_.join();
         }
-        if (downstream_sender_thread_.joinable()) {
-            downstream_sender_thread_.join();
-        }
+        //if (downstream_sender_thread_.joinable()) {
+        //    downstream_sender_thread_.join();
+        //}
         ENVOY_LOG(info, "All threads terminated");
 
         ENVOY_LOG(info, "upstream_to_downstream_buffer_ size: {}", upstream_to_downstream_buffer_->getSize()); // Should always be 0
@@ -504,7 +519,7 @@ private:
     // Threads
     std::thread rdma_polling_thread_;
     std::thread rdma_sender_thread_;
-    std::thread downstream_sender_thread_;
+    //std::thread downstream_sender_thread_;
 
     // Dispatcher
     Envoy::Event::Dispatcher* dispatcher_{}; //  Used to give the control back to the thread responsible for writing responses to the client (used in downstream_sender())

@@ -240,7 +240,7 @@ public:
 
         rdma_polling_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::rdma_polling, this);        
         rdma_sender_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::rdma_sender, this);
-        upstream_sender_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::upstream_sender, this);
+        //upstream_sender_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::upstream_sender, this);
     }    
 
     // This function will run in a thread and be responsible for RDMA polling
@@ -271,15 +271,22 @@ public:
                     std::string message((char*) get_payload(ith), get_length(ith)); // Put the received data in a string                
                     // Push the data in the circular buffer
                     ENVOY_LOG(debug, "received message: {}", message);
-                    bool pushed = downstream_to_upstream_buffer_->push(message);
-                    if (!pushed) {
-                        ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
-                        if (!connection_close_) {
-                            ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
-                            close_procedure();
+                    // bool pushed = downstream_to_upstream_buffer_->push(message);
+                    // if (!pushed) {
+                    //     ENVOY_LOG(error, "upstream_to_downstream_buffer_ is currently full");
+                    //     if (!connection_close_) {
+                    //         ENVOY_LOG(info, "Closed due to full upstream_to_downstream_buffer_");
+                    //         close_procedure();
+                    //     }
+                    //     break;
+                    // }
+                    auto weak_self = weak_from_this();
+                    dispatcher_->post([weak_self, buffer = std::make_shared<Buffer::OwnedImpl>(message)]() -> void {
+                        if (auto self = weak_self.lock()) {
+                            self->read_callbacks_->injectReadDataToFilterChain(*buffer, false); // Inject data to tcp_proxy
                         }
-                        break;
-                    }
+                    });
+
                     curOffset = (curOffset+1) % circleSize_;
                     curLimit = (curLimit+1) % circleSize_;
                     if (time_to_write(curLimit, remoteLimit_)) {
@@ -303,9 +310,11 @@ public:
         char *curSegment;
     	uint8_t offset = 0;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
-
+        uint64_t cnt = 0;
         while (true) {
+            int toswitch = 1;
             if (!can_write(offset, *hostLimit_)) {
+                if (toswitch) {cnt++; toswitch=0;}                
                 if (!active_rdma_sender_ && downstream_to_upstream_buffer_->getSize() == 0) {
                     break;
                 }
@@ -348,7 +357,7 @@ public:
                 }
             }            		
         }
-        ENVOY_LOG(info, "rdma_sender stopped");
+        ENVOY_LOG(info, "rdma_sender stopped cnt : {}", cnt);
     }
 
     // This function will run in a thread and be responsible for sending requests to the server through the dispatcher
