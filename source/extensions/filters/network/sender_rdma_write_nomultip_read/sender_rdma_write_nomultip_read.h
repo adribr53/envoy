@@ -122,14 +122,15 @@ public:
         downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
         upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
         segmentSize_ = sizeof(uint32_t) + sizeof(char) + payloadBound_;
-        bufferSize_ = (circleSize_ * segmentSize_ ) + sizeof(uint8_t);
+        bufferSize_ = (circleSize_ * segmentSize_ ) + 2*sizeof(uint32_t);
     }
 
     ///////////////////////////
     // bunch of utils for RDMA
     ///////////////////////////
-    int can_write(uint8_t offset, uint8_t limit) {	
-	    return offset!=limit;
+    int can_write(uint32_t offset, volatile uint32_t *limit) {	
+        if (~(*limit)!=*hostChksum_) return 0;
+        return offset!=*limit;
     }
 
     char get_toCheck(volatile char *cur) {
@@ -179,13 +180,14 @@ public:
         return ith;
     }
 
-    int time_to_write(uint8_t curLimit, uint8_t *remoteLimit) {
+    int time_to_write(uint32_t curLimit, uint32_t *remoteLimit) {
         //printf("%u %u\n", curLimit, *remoteLimit);
-        if (curLimit == *remoteLimit) return 0;
-        if (curLimit < *remoteLimit) {
-                return *remoteLimit-curLimit < circleSize_/4;}
-        else {// remoteLimit 109, curLimit 173
-                return curLimit-*remoteLimit > circleSize_/4;
+        if (curLimit==*remoteLimit) return 0;
+        switch (curLimit<*remoteLimit) {
+            case 1: 
+                return *remoteLimit-curLimit<circleSize_/4;
+            default: // remoteLimit 109, curLimit 173
+                return curLimit-*remoteLimit>circleSize_/4;
         }
     }
 
@@ -207,8 +209,9 @@ public:
 		remoteMemoryToken_ = (infinity::memory::RegionToken *) qpToWrite_->getUserData();
 		remoteMemory_ = new infinity::memory::Buffer(contextToWrite_, bufferSize_);
 		remoteBuffer_ = (char *) remoteMemory_->getData();
-		remoteHead_ = remoteBuffer_ + sizeof(uint8_t);
-		remoteLimit_ = (uint8_t *) remoteBuffer_;
+		remoteHead_ = remoteBuffer_ + 2*sizeof(uint32_t);
+		remoteLimit_ = (uint32_t *) remoteBuffer_;
+		remoteChksum_ = (uint32_t *) (remoteBuffer_+sizeof(uint32_t));
         ENVOY_LOG(debug, "CONNECTED RDMA");	
 
 		// SETUP 2
@@ -217,10 +220,12 @@ public:
 		hostMemory_ = new infinity::memory::Buffer(contextToPoll_, bufferSize_); // todo : one more case for reader head
 		hostMemoryToken_ = hostMemory_->createRegionToken();
 		volatile char *hostBuffer = (char *) hostMemory_->getData();
-		hostLimit_ = (uint8_t *) hostBuffer;
+		hostLimit_ = (uint32_t *) hostBuffer;
+		hostChksum_ = (uint32_t *) (hostBuffer+sizeof(uint32_t));
 		*hostLimit_ = circleSize_-1;
-		hostHead_ = hostBuffer + sizeof(uint8_t); 		 		
-		for (uint8_t i = 1; i <= circleSize_; i++) {
+		*hostChksum_ = ~(*hostLimit_);
+		hostHead_ = hostBuffer+2*sizeof(uint32_t); 			 		
+		for (uint32_t i = 1; i <= circleSize_; i++) {
 			volatile char *ith = get_ith(hostHead_, i);
 			set_toCheck(ith, '0');
 		}
@@ -238,8 +243,8 @@ public:
     void rdma_polling() {
         ENVOY_LOG(info, "rdma_polling started");
 
-        uint8_t curOffset = 0;		
-        uint8_t curLimit = circleSize_ - 1;
+        uint32_t curOffset = 0;		
+        uint32_t curLimit = circleSize_ - 1;
         *remoteLimit_ = curLimit;	
 
         clock_t lastTime = clock();
@@ -282,13 +287,14 @@ public:
                     //printf("time to write %u %u\n", curLimit, *remoteLimit);
                     //qpToWrite->read(remoteMemory, remoteMemoryToken, sizeof(uint8_t), &requestTokenRead);
                     *remoteLimit_ = curLimit;
+                    *remoteChksum_ = ~curLimit;
                     if (!unsignaled) {
-                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
+                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, 2*sizeof(uint32_t), infinity::queues::OperationFlags(), &requestTokenWriteControl);		
                         requestTokenWriteControl.waitUntilCompleted();
                     } else {
-                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, sizeof(uint8_t), infinity::queues::OperationFlags(), NULL);
+                        qpToWrite_->write(remoteMemory_, 0, remoteMemoryToken_, 0, 2*sizeof(uint32_t), infinity::queues::OperationFlags(), NULL);
                     }
-                    unsignaled = (unsignaled + 1 % 128);
+                    unsignaled = (unsignaled + 1) % 128;
                 }
                 lastTime = clock();
             }		
@@ -300,13 +306,13 @@ public:
     void rdma_sender() {
         ENVOY_LOG(info, "rdma_sender launched");
         char *curSegment;
-    	uint8_t offset = 0;
+    	uint32_t offset = 0;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
-
+        uint8_t unsignaled = 0;
         uint64_t cnt = 0;
         while (true) {
             int toswitch = 1;
-            if (!can_write(offset, *hostLimit_)) {
+            if (!can_write(offset, hostLimit_)) {
                 if (toswitch) {cnt++; toswitch=0;}   
                 if (!active_rdma_sender_ && downstream_to_upstream_buffer_->getSize() == 0) {
                     break;
@@ -333,15 +339,16 @@ public:
                 memcpy(curSegment+payloadBound_-item.size(), item.c_str(), length);
                 set_toCheck(curSegment, '1');		
                 set_length(curSegment, length);		
-                uint32_t writeOffset = sizeof(uint8_t) + (segmentSize_ * offset) + (payloadBound_-length);		
+                uint32_t writeOffset = 2*sizeof(uint32_t) + (segmentSize_ * offset) + (payloadBound_-length);		
                 uint32_t writeLength = sizeof(uint32_t) + sizeof(char)+length;		
-                if (!offset) {
+                if (!unsignaled) {
                     qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), &requestTokenWrite);		
                     requestTokenWrite.waitUntilCompleted();
                 } else {
                     qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), NULL);
                 }
                 offset = (offset + 1) % circleSize_;
+                unsignaled = (unsignaled + 1) % 128;  
             }	
             else { // No item was retrieved after timeout_value seconds
                 if (!active_rdma_sender_) { // If timeout and flag false: stop thread
@@ -497,7 +504,8 @@ private:
     infinity::memory::Buffer *remoteMemory_;
     char *remoteBuffer_;
     char *remoteHead_;
-    uint8_t *remoteLimit_;
+    uint32_t *remoteLimit_;
+    uint32_t *remoteChksum_;
 
     infinity::core::Context *contextToPoll_;
     infinity::queues::QueuePairFactory *qpFactoryToPoll_;
@@ -505,8 +513,9 @@ private:
     infinity::memory::Buffer *hostMemory_; // todo : one more case for reader head
     infinity::memory::RegionToken *hostMemoryToken_;
     volatile char *hostHead_; 
-    volatile uint8_t* hostLimit_;
-
+    volatile uint32_t* hostLimit_;
+    volatile uint32_t* hostChksum_;
+    
     // Buffers
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_; // Buffer supplied by onData() and consumed by the RDMA sender thread
     std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_; // Buffer supplied by RDMA polling thread and consumed by downstream sender thread
