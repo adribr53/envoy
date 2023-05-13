@@ -245,7 +245,7 @@ public:
         ENVOY_LOG(debug, "CONNECTED RDMA");
 
         rdma_polling_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::rdma_polling, this);        
-        rdma_sender_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::rdma_sender, this);
+        //rdma_sender_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::rdma_sender, this);
         //upstream_sender_thread_ = std::thread(&ReceiverRDMAWriteNomultipReadFilter::upstream_sender, this);
     }    
 
@@ -414,9 +414,9 @@ public:
         if (rdma_polling_thread_.joinable()) {
             rdma_polling_thread_.join();
         }
-        if (rdma_sender_thread_.joinable()) {
-            rdma_sender_thread_.join();
-        }
+        // if (rdma_sender_thread_.joinable()) {
+        //     rdma_sender_thread_.join();
+        // }
         if (upstream_sender_thread_.joinable()) {
             upstream_sender_thread_.join();
         }
@@ -533,7 +533,7 @@ private:
     uint32_t offset_ = 0;
     uint8_t unsignaled_ = 1;
     infinity::requests::RequestToken *requestTokenWrite_;
-    
+
     // Buffers
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_; // Buffer supplied by RDMA polling thread and consumed by the upstream sender thread
     std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_; // Buffer supplied by onWrite() and consumed by RDMA sender thread
@@ -543,7 +543,7 @@ private:
 
     // Threads
     std::thread rdma_polling_thread_;
-    std::thread rdma_sender_thread_;
+    //std::thread rdma_sender_thread_;
     std::thread upstream_sender_thread_;
 
     // Thread flags
