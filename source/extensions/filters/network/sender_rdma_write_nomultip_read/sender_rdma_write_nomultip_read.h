@@ -119,8 +119,8 @@ public:
         ENVOY_LOG(info, "timeToWrite_: {}", timeToWrite_);
         ENVOY_LOG(info, "sharedBufferSize_: {}", sharedBufferSize_);
 
-        downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
-        upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
+        //downstream_to_upstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
+        //upstream_to_downstream_buffer_ = std::make_shared<CircularBuffer<std::string>>(sharedBufferSize_);
         segmentSize_ = sizeof(uint32_t) + sizeof(char) + payloadBound_;
         bufferSize_ = (circleSize_ * segmentSize_ ) + 2*sizeof(uint32_t);
     }
@@ -234,7 +234,7 @@ public:
 
         ENVOY_LOG(debug, "ACCEPTED RDMA");
         
-        rdma_sender_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::rdma_sender, this);
+        //rdma_sender_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::rdma_sender, this);
         rdma_polling_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::rdma_polling, this);
         //downstream_sender_thread_ = std::thread(&SenderRDMAWriteNomultipReadFilter::downstream_sender, this);
     }
@@ -400,16 +400,16 @@ public:
         if (rdma_polling_thread_.joinable()) {
             rdma_polling_thread_.join();
         }
-        if (rdma_sender_thread_.joinable()) {
-            rdma_sender_thread_.join();
-        }
+        // if (rdma_sender_thread_.joinable()) {
+        //     rdma_sender_thread_.join();
+        // }
         //if (downstream_sender_thread_.joinable()) {
         //    downstream_sender_thread_.join();
         //}
         ENVOY_LOG(info, "All threads terminated");
 
-        ENVOY_LOG(info, "upstream_to_downstream_buffer_ size: {}", upstream_to_downstream_buffer_->getSize()); // Should always be 0
-        ENVOY_LOG(info, "downstream_to_upstream_buffer_ size: {}", downstream_to_upstream_buffer_->getSize()); // Should always be 0
+        // ENVOY_LOG(info, "upstream_to_downstream_buffer_ size: {}", upstream_to_downstream_buffer_->getSize()); // Should always be 0
+        // ENVOY_LOG(info, "downstream_to_upstream_buffer_ size: {}", downstream_to_upstream_buffer_->getSize()); // Should always be 0
 
         // Close filter connections and flush pending write data
         if (read_callbacks_->connection().state() == Network::Connection::State::Open) {
@@ -515,7 +515,9 @@ private:
     volatile char *hostHead_; 
     volatile uint32_t* hostLimit_;
     volatile uint32_t* hostChksum_;
-    
+
+    uint32_t offset_ = 0;
+    infinity::requests::RequestToken *requestTokenWrite_;
     // Buffers
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_; // Buffer supplied by onData() and consumed by the RDMA sender thread
     std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_; // Buffer supplied by RDMA polling thread and consumed by downstream sender thread
@@ -527,7 +529,7 @@ private:
 
     // Threads
     std::thread rdma_polling_thread_;
-    std::thread rdma_sender_thread_;
+    //std::thread rdma_sender_thread_;
     //std::thread downstream_sender_thread_;
 
     // Dispatcher
