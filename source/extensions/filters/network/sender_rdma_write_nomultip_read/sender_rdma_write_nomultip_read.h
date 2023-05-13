@@ -517,6 +517,7 @@ private:
     volatile uint32_t* hostChksum_;
 
     uint32_t offset_ = 0;
+    uint8_t unsignaled_ = 1;
     infinity::requests::RequestToken *requestTokenWrite_;
     // Buffers
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_; // Buffer supplied by onData() and consumed by the RDMA sender thread

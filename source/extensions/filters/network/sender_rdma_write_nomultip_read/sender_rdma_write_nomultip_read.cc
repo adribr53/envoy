@@ -64,7 +64,7 @@ Network::FilterStatus SenderRDMAWriteNomultipReadFilter::onData(Buffer::Instance
     // Push received data in circular buffer in string chunks of size payloadBound_   
     // TO TEST : replace by write
     ENVOY_LOG(debug, "T2");
-    uint8_t unsignaled = 0;
+    
     while (data.length() > 0) {
         ENVOY_LOG(debug, "T3");
         uint32_t bytes_to_process = (uint32_t) std::min(data.length(), (const uint64_t) payloadBound_);
@@ -94,14 +94,14 @@ Network::FilterStatus SenderRDMAWriteNomultipReadFilter::onData(Buffer::Instance
         set_length(curSegment, bytes_to_process);
         uint32_t writeOffset = 2*sizeof(uint32_t) + (segmentSize_ * offset_) + (payloadBound_-bytes_to_process);		
         uint32_t writeLength = sizeof(uint32_t) + sizeof(char)+bytes_to_process;		
-        if (!unsignaled) {
+        if (!unsignaled_) {
             qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), requestTokenWrite_);		
             requestTokenWrite_->waitUntilCompleted();
         } else {
             qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), NULL);
         }
         offset_ = (offset_ + 1) % circleSize_;		
-        unsignaled = (unsignaled + 1) % 128;
+        unsignaled_ = (unsignaled_ + 1) % 128;
     }
 
     // Drain read buffer

@@ -498,7 +498,7 @@ private:
     // Connection flags
     std::atomic<bool> connection_close_{false}; // Keep track of connection state
     std::atomic<bool> connection_init_{true};
-
+    std::atomic<bool> first_write_{true};
     // Timeout
     const static uint32_t timeout_value_ = 1; // In seconds
       
@@ -530,6 +530,10 @@ private:
     volatile uint32_t* hostLimit_;
     volatile uint32_t* hostChksum_;
 
+    uint32_t offset_ = 0;
+    uint8_t unsignaled_ = 1;
+    infinity::requests::RequestToken *requestTokenWrite_;
+    
     // Buffers
     std::shared_ptr<CircularBuffer<std::string>> downstream_to_upstream_buffer_; // Buffer supplied by RDMA polling thread and consumed by the upstream sender thread
     std::shared_ptr<CircularBuffer<std::string>> upstream_to_downstream_buffer_; // Buffer supplied by onWrite() and consumed by RDMA sender thread
