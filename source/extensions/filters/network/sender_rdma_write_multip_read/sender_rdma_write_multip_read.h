@@ -145,17 +145,17 @@ public:
 
     uint32_t get_length(volatile char *cur) {
         cur = cur + payloadBound_;
-        return ntohl(*((uint32_t *)cur));
+        return *((uint32_t *)cur);
     }
 
     uint32_t get_length(char *cur) {	
         cur = cur + payloadBound_;
-        return ntohl(*((uint32_t *)cur));
+        return *((uint32_t *)cur);
     }
 
     void set_length(volatile char *cur, uint32_t length) {
         uint32_t *ptr = (uint32_t *) (cur + payloadBound_);
-        *ptr = htonl(length);
+        *ptr = length;
     }
 
     volatile char *get_payload(volatile char *cur) {
@@ -293,7 +293,7 @@ public:
     	uint32_t offset = 0;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
         infinity::requests::RequestToken requestTokenRead(contextToWrite_);
-        uint8_t unsignaled = 0;
+        uint8_t unsignaled = 1;
         while (true) {
             std::string item;
             ENVOY_LOG(debug, "Before getting item");

@@ -152,17 +152,17 @@ public:
 
     uint32_t get_length(volatile char *cur) {
         cur = cur + payloadBound_;
-        return ntohl(*((uint32_t *)cur));
+        return *((uint32_t *)cur);
     }
 
     uint32_t get_length(char *cur) {	
         cur = cur + payloadBound_;
-        return ntohl(*((uint32_t *)cur));
+        return *((uint32_t *)cur);
     }
 
     void set_length(volatile char *cur, uint32_t length) {
         uint32_t *ptr = (uint32_t *) (cur + payloadBound_);
-        *ptr = htonl(length);
+        *ptr = length;
     }
 
     volatile char *get_payload(volatile char *cur) {
@@ -289,6 +289,7 @@ public:
         ENVOY_LOG(info, "rdma_sender launched");
         char *curSegment;
     	uint32_t offset = 0;
+        uint8_t unsignaled = 1;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
         infinity::requests::RequestToken requestTokenRead(contextToWrite_);
 
@@ -312,7 +313,7 @@ public:
                 set_length(curSegment, length);		
                 uint32_t writeOffset = 2*sizeof(uint32_t) + (segmentSize_ * offset) + (payloadBound_-length);		
                 uint32_t writeLength = sizeof(uint32_t)+sizeof(char)+length;		
-                if (!offset) {
+                if (!unsignaled) {
                     qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), &requestTokenWrite);		
                     requestTokenWrite.waitUntilCompleted();
                 } 
@@ -320,6 +321,7 @@ public:
                     qpToWrite_->write(remoteMemory_, writeOffset, remoteMemoryToken_, writeOffset, writeLength, infinity::queues::OperationFlags(), NULL);
                 }
                 offset = (offset + 1) % circleSize_;
+                unsignaled = (unsignaled + 1) % 128;
             } 	
             else { // No item was retrieved after timeout_value seconds
                 if (!active_rdma_sender_) { // If timeout and flag false: stop thread

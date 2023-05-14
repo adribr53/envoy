@@ -145,17 +145,17 @@ public:
 
     uint32_t get_length(volatile char *cur) {
         cur = cur + payloadBound_;
-        return ntohl(*((uint32_t *)cur));
+        return *((uint32_t *)cur);
     }
 
     uint32_t get_length(char *cur) {	
         cur = cur + payloadBound_;
-        return ntohl(*((uint32_t *)cur));
+        return *((uint32_t *)cur);
     }
 
     void set_length(volatile char *cur, uint32_t length) {
         uint32_t *ptr = (uint32_t *) (cur + payloadBound_);
-        *ptr = htonl(length);
+        *ptr = length;
     }
 
     volatile char *get_payload(volatile char *cur) {
@@ -185,9 +185,9 @@ public:
         if (curLimit==*remoteLimit) return 0;
         switch (curLimit<*remoteLimit) {
             case 1: 
-                return *remoteLimit-curLimit<circleSize_/4;
+                return *remoteLimit-curLimit<circleSize_/2;
             default: // remoteLimit 109, curLimit 173
-                return curLimit-*remoteLimit>circleSize_/4;
+                return curLimit-*remoteLimit>circleSize_/2;
         }
     }
 
@@ -249,7 +249,7 @@ public:
 
         clock_t lastTime = clock();
         infinity::requests::RequestToken requestTokenWriteControl(contextToWrite_);
-        uint8_t unsignaled = 0;
+        uint8_t unsignaled = 1;
         while (true) {
             volatile char *ith = get_ith(hostHead_, curOffset);
             if (3000000 < clock() - lastTime) {	
@@ -308,7 +308,7 @@ public:
         char *curSegment;
     	uint32_t offset = 0;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
-        uint8_t unsignaled = 0;
+        uint8_t unsignaled = 1;
         uint64_t cnt = 0;
         while (true) {
             int toswitch = 1;
