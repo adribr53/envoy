@@ -258,7 +258,7 @@ public:
 
         clock_t lastTime = clock();
         infinity::requests::RequestToken requestTokenWriteControl(contextToWrite_);
-        uint8_t unsignaled = 0;
+        uint8_t unsignaled = 1;
         while (true) {
             volatile char *ith = get_ith(hostHead_, curOffset);
 
@@ -321,7 +321,7 @@ public:
         ENVOY_LOG(info, "rdma_sender launched");
         char *curSegment;
     	uint32_t offset = 0;
-        uint8_t unsignaled = 0;
+        uint8_t unsignaled = 1;
 	    infinity::requests::RequestToken requestTokenWrite(contextToWrite_);
         uint64_t cnt = 0;
         while (true) {
