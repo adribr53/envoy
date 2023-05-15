@@ -54,8 +54,8 @@ static_resources:
           - name: sender
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.${sender_type}.v3.${SENDER_TYPE}
-              payload_bound: 1500
-              circle_size: 200
+              payload_bound: ${payload_bound}
+              circle_size: ${circle_size}
               time_to_write: 50
               shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
@@ -74,8 +74,8 @@ static_resources:
           - name: receiver
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.${receiver_type}.v3.${RECEIVER_TYPE}
-              payload_bound: 1500
-              circle_size: 200
+              payload_bound: ${payload_bound}
+              circle_size: ${circle_size}
               time_to_write: 50
               shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
@@ -94,8 +94,8 @@ static_resources:
           - name: receiver
             typed_config:
               "@type": type.googleapis.com/envoy.extensions.filters.network.${receiver_type}.v3.${RECEIVER_TYPE}
-              payload_bound: 1500
-              circle_size: 200
+              payload_bound: ${payload_bound}
+              circle_size: ${circle_size}
               time_to_write: 50
               shared_buffer_size: 8388608
           - name: envoy.filters.network.tcp_proxy
